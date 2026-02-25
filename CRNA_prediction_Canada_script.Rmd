@@ -1,0 +1,2479 @@
+---
+title: "CRNA_prediction_Canada_script"
+author: "Dwayne Tucker"
+date: "2026-02-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(haven)
+library(tidyverse)
+library(naniar)
+library(dplyr)
+library(ggplot2)
+library(skimr)
+library(psych)
+library(rmarkdown)
+library(survey)
+library(janitor)
+library(vip)
+library(mice)
+library(ranger)
+library(caret)
+library(VIM)
+library(srvyr)
+library(tidymodels)
+library(doParallel)
+library(WeightedROC)
+library(dplyr)
+library(ggplot2)
+library(Hmisc)  # for wtd.mean, wtd.var if needed
+library(broom)
+library(dplyr)
+library(rsample)
+library(purrr)
+library(CalibrationCurves)
+library(bonsai)
+library(lightgbm)
+```
+
+
+```{r}
+# Import data
+#data <- read.csv("cchs_escc_bsw.csv")
+data <- read_dta("hs.dta")
+bsw <- read_dta("bsw.dta")
+```
+
+```{r}
+# View data structure
+glimpse(data)
+
+# Check for duplicated row ID's--- (not particularly relevant as record number. However no duplicates were noted.)
+sum(duplicated(data$ADM_RNO1))
+
+# missing data summary
+miss_summary(data)
+
+miss_var_summary(data)
+
+```
+
+```{r}
+# RECODING OF KEY VARIABLES. "Not stated", "Don't know", "Refusal", "Not stated" was re-coded as Missing/ Na 
+
+##### CHRONIC CONDITIONS
+
+# Has asthma
+data$CCC_015 <- recode(data$CCC_015,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has a COPD. Do you have chronic bronchitis, emphysema or chronic obstructive pulmonary disease or COPD?
+data$CCC_030 <- recode(data$CCC_030,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has sleep apnea. Have you been told by a health professional that you have sleep apnea?
+data$CCC_035 <- recode(data$CCC_035,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has sleep apnea. Have you been told by a health professional that you have sleep apnea?
+data$CCC_035 <- recode(data$CCC_035,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has scoliosis. Do you have scoliosis?
+data$CCC_040 <- recode(data$CCC_040,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+# Has fibromyalgia. Do you have fibromyalgia?
+data$CCC_045 <- recode(data$CCC_045,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has arthritis (e.g. osteoarthritis, rheumatoid arthritis, gout). Do you have arthritis, for example osteoarthritis, rheumatoid arthritis, gout or any other type, excluding fibromyalgia?
+data$CCC_050 <- recode(data$CCC_050,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has back problems (excluding scoliosis, fibromyalgia and arthritis). Do you have back problems, excluding scoliosis, fibromyalgia and arthritis?
+data$CCC_055 <- recode(data$CCC_055,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Do you have osteoporosis?
+data$CCC_060 <- recode(data$CCC_060,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has high blood pressure. Do you have high blood pressure?
+data$CCC_065 <- recode(data$CCC_065,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has high blood cholesterol / lipids. Do you have high blood cholesterol or lipids?
+data$CCC_075 <- recode(data$CCC_075,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+
+# Has heart disease. Do you have heart disease?
+data$CCC_085 <- recode(data$CCC_085,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Suffers from the effects of a stroke. Do you suffer from the effects of a stroke?
+data$CCC_090 <- recode(data$CCC_090,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has diabetes. Do you have diabetes?
+data$CCC_095 <- recode(data$CCC_095,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Do you have cancer?
+data$CCC_130 <- recode(data$CCC_130,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has migraine headaches
+data$CCC_140 <- recode(data$CCC_140,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has chronic fatigue syndrome. Do you have chronic fatigue syndrome?
+data$CCC_185 <- recode(data$CCC_185,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Suffers from multiple chemical sensitivities. Do you suffer from multiple chemical sensitivities?
+data$CCC_190 <- recode(data$CCC_190,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has a mood disorder (depression, bipolar, mania, dysthymia). Do you have a mood disorder such as depression, bipolar disorder, mania or dysthymia?
+data$CCC_195 <- recode(data$CCC_195,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+
+# Has an anxiety disorder (phobia, OCD, panic). Do you have an anxiety disorder such as a phobia, obsessive-compulsive disorder or a panic disorder?
+data$CCC_200 <- recode(data$CCC_200,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+
+# Groupings for disorders
+# NOTE: Use isTRUE(. == "Yes") to prevent NA propagation in logical OR statements.
+data <- data %>%
+  mutate(
+    # Musculoskeletal / connective tissue
+    muscu = factor(
+      if_else(
+        CCC_040 == "Yes" | CCC_045 == "Yes" | CCC_050 == "Yes" |
+          CCC_060 == "Yes" | CCC_065 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    ),
+
+    # Respiratory
+    respiratory = factor(
+      if_else(
+        CCC_015 == "Yes" | CCC_030 == "Yes" | CCC_035 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    ),
+
+    # Cardiometabolic
+    cardiometabolic = factor(
+      if_else(
+        CCC_070 == "Yes" | CCC_075 == "Yes" | CCC_085 == "Yes" | CCC_090 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    ),
+
+    # Neurologic / pain-related
+    neurologic_pain = factor(
+      if_else(
+        CCC_140 == "Yes" | CCC_185 == "Yes" | CCC_190 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    ),
+
+    # Mental health
+    mental_health = factor(
+      if_else(
+        CCC_195 == "Yes" | CCC_200 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    ),
+
+    # Cancer
+    cancer = factor(
+      if_else(
+        CCC_130 == "Yes",
+        "Yes", "No"
+      ),
+      levels = c("No", "Yes")
+    )
+  )
+
+# Counts on number of chronic conditions
+data <- data %>%
+  mutate(chronic_condition_number = rowSums(across(c(CCC_015, CCC_030, CCC_035, CCC_040,CCC_045, CCC_050, CCC_055, CCC_060, CCC_065, CCC_075, CCC_085, CCC_090, CCC_095, CCC_130, CCC_140, CCC_185, CCC_190, CCC_195, CCC_200), ~ . == "Yes"), na.rm = TRUE))
+ 
+data$chronic_condition_number <- case_match(data$chronic_condition_number,
+                                            0 ~ '0',
+                                            1 ~ '1',
+                                            2 ~ '2',
+                                            3 ~ '3',
+                                            4:19 ~ '>4',
+                                            ) %>% factor(ordered=FALSE, levels=c("0", "1", "2", "3", ">4"))
+
+
+
+# During the last 12 months, was there a time when you did not fill or collect a prescription for medicine, or you skipped doses of your medicine because of the cost?
+
+# CRNA variable. renamed to exclude 'Valid skip' as the variable will be assessed as "RESPONDENTS ASSESSED FOR CRNA"
+data$PEX_090 <- recode(data$PEX_090,
+  `1` = "Yes",
+  `2` = "No",
+  `3` = "NA, no prescription to fill in the last 12 months",
+  `7` = "Dont know",
+  `8` = "Refusal",
+  `9` = "Not stated"
+) |> factor(levels = c(
+  "No", "Yes", "NA, no prescription to fill in the last 12 months",
+  "Dont know", "Refusal", "Not stated"
+))
+
+table(data$PEX_090)
+
+
+# CRNA variable for modeling: treat refusal/don't know/not stated/valid skip as missing
+data$PEX_090_model <- recode(data$PEX_090,
+  `1` = "Yes",
+  `2` = "No",
+  `3` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Province of residence of respondents
+data$GEO_PRV <- recode(data$GEO_PRV,
+  `10` = "NEWFOUNDLAND AND LABRADOR",
+  `11` = "PRINCE EDWARD ISLAND",
+  `12` = "NOVA SCOTIA",
+  `13` = "NEW BRUNSWICK",
+  `24` = "QUEBEC",
+  `35` = "ONTARIO",
+  `46` = "MANITOBA",
+  `47` = "SASKATCHEWAN",
+  `48` = "ALBERTA",
+  `59` = "BRITISH COLUMBIA",
+  `60` = "YUKON",
+  `61` = "NORTHWEST TERRITORIES"
+) |> factor(levels = c(
+  "QUEBEC", "ONTARIO",
+  "NEWFOUNDLAND AND LABRADOR",
+  "PRINCE EDWARD ISLAND",
+  "NOVA SCOTIA",
+  "NEW BRUNSWICK",
+  "MANITOBA",
+  "SASKATCHEWAN",
+  "ALBERTA",
+  "BRITISH COLUMBIA",
+  "YUKON",
+  "NORTHWEST TERRITORIES"
+))
+
+
+# Marital status
+data$DHHGMS <- recode(data$DHHGMS,
+  `1` = "Married",
+  `2` = "Common law",
+  `3` = "Widowed/Divorced/Separated",
+  `4` = "Single",
+  `9` = NA_character_
+)
+
+data <- data %>%
+  mutate(
+    DHHGMS = case_when(
+      DHHGMS %in% c("Married", "Common law") ~ "Married/Common-law",
+      DHHGMS %in% c("Widowed/Divorced/Separated", "Single") ~ "Widowed/Divorced/Separated/Single, never married",
+      TRUE ~ NA_character_
+    ),
+    DHHGMS = factor(
+      DHHGMS,
+      levels = c("Married/Common-law", "Widowed/Divorced/Separated/Single, never married")
+    )
+  )
+
+
+
+# Highest level of education
+data$EHG2DVH3 <- recode(data$EHG2DVH3,
+  `1` = "Less than secondary school graduation",
+  `2` = "Secondary school graduation, no post-secondary education",
+  `3` = "Post-secondary certificate/diploma / university degree",
+  # `9` = "Not stated",
+  `9` = NA_character_
+) |> factor(
+  levels = c(
+    "Less than secondary school graduation",
+    "Post-secondary certificate/diploma / university degree",
+    "Secondary school graduation, no post-secondary education"
+  ),
+  ordered = FALSE
+)
+
+
+# Total Household Income
+data$INCDGHH <- recode(data$INCDGHH,
+  `1` = "<$20,000",
+  `2` = "$20,000-$39,000",
+  `3` = "$40,000-$59,000",
+  `4` = "$60,000-$79,000",
+  `5` = "≥$80,000",
+  `9` = NA_character_
+) |> factor(
+  levels = c("≥$80,000", "<$20,000", "$20,000-$39,000", "$40,000-$59,000", "$60,000-$79,000"),
+  ordered = FALSE
+)
+
+
+# Sexual orientation
+data$SDC_035 <- recode(data$SDC_035,
+  `1` = "Heterosexual",
+  `2` = "Homosexual, that is lesbian or gay",
+  `3` = "Bisexual",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("Heterosexual", "Bisexual", "Homosexual, that is lesbian or gay"))
+
+
+# Sex at birth
+data$DHH_SEX <- recode(data$DHH_SEX,
+  `1` = "Male",
+  `2` = "Female"
+) |> factor(levels = c("Male", "Female"))
+
+
+
+# Age, grouped
+data$DHHGAGE <- recode(data$DHHGAGE,
+  `1` = "12-17",
+  `2` = "12-17",
+  `3` = "18-34",
+  `4` = "18-34",
+  `5` = "18-34",
+  `6` = "18-34",
+  `7` = "35-49",
+  `8` = "35-49",
+  `9` = "35-49",
+  `10` = "50-64",
+  `11` = "50-64",
+  `12` = "65-79",
+  `13` = "65-79",
+  `14` = "65-79",
+  `15` = "65-79",
+  `16` = "≥80"
+) |> factor(levels = c("≥80", "12-17", "18-34", "35-49", "50-64", "65-79"), ordered = FALSE)
+
+
+
+# Immigration status/ Country of Birth
+data$SDCDGCB <- recode(data$SDCDGCB,
+  `1` = "Canada",
+  `2` = "Other",
+  # `9` = "Not stated",
+  `9` = NA_character_
+) |> factor(levels = c("Canada", "Other"))
+
+
+# Dwelling ownership - own or rent. Is this dwelling...?
+data$DHH_OWN <- recode(data$DHH_OWN,
+  `1` = "Owned",
+  `2` = "Rented",
+  # `9` = "Not stated",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("Owned", "Rented"))
+
+
+# Cultural/ racial background
+data$SDCDGCGT <- recode(data$SDCDGCGT,
+  `1` = "White",
+  `2` = "Non-white",
+  # `9` = "Not stated",
+  `9` = NA_character_
+) |> factor(levels = c("White", "Non-white"))
+
+
+
+# Satisfaction with life
+data$GENDVSWL <- recode(data$GENDVSWL,
+  `1` = "Very Satisfied",
+  `2` = "Satisfied",
+  `3` = "Neither satisfied nor dissatisfied",
+  `4` = "Dissatisfied",
+  `5` = "Very Dissatisfied",
+  # `9` = "Not stated",
+  `9` = NA_character_
+) |> factor(
+  levels = c("Very Satisfied", "Satisfied", "Neither satisfied nor dissatisfied", "Dissatisfied", "Very Dissatisfied"),
+  ordered = FALSE
+)
+
+
+# Overall perceived health
+data$GEN_005 <- recode(data$GEN_005,
+  `1` = "Excellent",
+  `2` = "Very good",
+  `3` = "Good",
+  `4` = "Fair",
+  `5` = "Poor",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("Excellent", "Very good", "Good", "Fair", "Poor"), ordered = FALSE)
+
+
+# Perceived mental health (Derived variable)
+data$GENDVMHI <- recode(data$GENDVMHI,
+  `4` = "Excellent",
+  `3` = "Very good",
+  `2` = "Good",
+  `1` = "Fair",
+  `0` = "Poor",
+  # `7` = "Dont know",
+  # `8` = "Refusal",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("Excellent", "Very good", "Good", "Fair", "Poor"), ordered = FALSE)
+
+
+# Insurance covers part or all of prescription medication cost. Do you have insurance that covers all or part of the cost of your prescription medications?
+data$INS_005 <- recode(data$INS_005,
+  `1` = "Yes",
+  `2` = "No",
+  # `6` = "Valid skip",
+  # `7` = "Dont know",
+  # `8` = "Refusal",
+  # `9` = "Not stated",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# TYPE OF INSURANCE. FOR THOSE WHO ANSWERED YES TO "INS_005"
+# Government
+data$INS_010A <- recode(data$INS_010A,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Employer
+data$INS_010B <- recode(data$INS_010B,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Association. Is it...?A plan sponsored through an association such as a union, trade association or student organization
+data$INS_010C <- recode(data$INS_010C,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+
+# Private. Other, such as your own private plan purchased from an insurance company
+data$INS_010D <- recode(data$INS_010D,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Do you have insurance that covers all or part of your long-term care costs, including home care?
+data$INS_015 <- recode(data$INS_015,
+  `1` = "Yes",
+  `2` = "No",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+# Type of insurance - long-term care costs - govt. 
+data$INS_020A <- recode(data$INS_020A,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Type of insurance - long-term care costs - employer
+data$INS_020B <- recode(data$INS_020B,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+
+# Type of insurance - long-term care costs - association
+data$INS_020C <- recode(data$INS_020C,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Type of insurance - long-term care costs - own private plan
+data$INS_020D <- recode(data$INS_020D,
+  `1` = "Yes",
+  `2` = "No",
+  `6` = NA_character_,
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+
+# Has a regular health care provider
+data$PHC_020 <- recode(data$PHC_020,
+  `1` = "Yes",
+  `2` = "No",
+  # `6` = "Valid skip",
+  # `7` = "Dont know",
+  # `8` = "Refusal",
+  `7` = NA_character_,
+  `8` = NA_character_,
+  `9` = NA_character_
+) |> factor(levels = c("No", "Yes"))
+
+# View insurance variables
+#data %>% select(INS_005, INS_010A, INS_010B, INS_010C, INS_010D) %>% view()
+
+```
+
+
+```{r}
+# Weights = WTS_M
+
+data2 <- data %>% select(ADM_RNO, GEO_PRV, DHH_SEX, PHC_020, INS_005, GEN_005, GENDVSWL, SDCDGCB, SDCDGCGT, DHHGAGE, INCDGHH, EHG2DVH3, DHHGMS, PEX_090, SDC_015, GENDVMHI, INS_015, INS_020A, INS_020B, INS_020C, INS_020D,SDCDVIMM,
+                                 CCC_015, CCC_030, CCC_035, CCC_040,CCC_045, CCC_050, CCC_055, CCC_060, CCC_065, CCC_075, CCC_085, CCC_090, CCC_095, CCC_130, CCC_140, CCC_185, CCC_190, CCC_195, CCC_200, chronic_condition_number, INS_010A, INS_010B, INS_010C, INS_010D, SDCDVIMM, DHH_OWN, SDC_035, GEODGHR4, GENDVHDI, muscu, respiratory, cardiometabolic, neurologic_pain, mental_health, cancer, WTS_M)
+
+```
+
+```{r}
+# Hard 'No' definition. Total n= 80,0110. 
+data2 <- data2 %>% 
+  filter(PEX_090 %in% c("Yes", "No")) %>%
+  mutate(PEX_090 = factor(PEX_090, levels = c("No", "Yes")))
+
+```
+
+
+```{r}
+# Further variable manipulation. Collapsing categorical levels e,g, dissatsified and very dissatisfied into one level due to small cell sizes
+
+# Satisfaction with life
+data2 <-data2 %>%
+  mutate(GENDVSWL = case_when(
+   GENDVSWL %in% c("Dissatisfied", "Very Dissatsified") ~ "Dissatisfied/ Very Dissatisfied",
+    TRUE ~ as.character(GENDVSWL)
+  )) %>%
+  mutate(GENDVSWL = factor(GENDVSWL, levels = c("Very Satisfied", "Satisfied", "Neither satisfied nor dissatisfied", "Dissatisfied/ Very Dissatisfied")), ordered = FALSE)
+
+
+# Perceived mental health
+data2 <- data2 %>%
+  mutate(GENDVMHI = case_when(
+   GENDVMHI %in% c("Fair", "Poor") ~ "Fair or Poor",
+    TRUE ~ as.character(GENDVMHI)
+  )) %>%
+  mutate(GENDVMHI = factor(GENDVMHI, levels = c("Excellent", "Very good", "Good", "Fair or Poor"), ordered = FALSE))
+
+
+# Overall Perceived health
+data2 <- data2 %>%
+  mutate(GEN_005 = case_when(
+   GEN_005 %in% c("Fair", "Poor") ~ "Fair or Poor",
+    TRUE ~ as.character(GEN_005)
+  )) %>%
+  mutate(GEN_005 = factor(GEN_005, levels = c("Excellent", "Very good", "Good", "Fair or Poor"), ordered = FALSE))
+
+
+# Age
+data2 <- data2 %>%
+  mutate(DHHGAGE = case_when(
+    DHHGAGE %in% c("12-17", "18-34") ~ "≤34",
+    DHHGAGE %in% c("35-49") ~ "35-49",
+    DHHGAGE %in% c("50-64") ~ "50-64",
+    DHHGAGE %in% c("65-79", "≥80") ~ "≥65",
+    TRUE ~ as.character(DHHGAGE)
+  )) %>%
+  mutate(DHHGAGE  = factor(DHHGAGE , levels = c("≥65","≤34", "35-49","50-64"), ordered = FALSE))
+
+
+# Province of residence
+
+data2 <- data2 %>% mutate(REGION = case_when(
+  GEO_PRV %in% c("NEWFOUNDLAND AND LABRADOR", "PRINCE EDWARD ISLAND", "NOVA SCOTIA", "NEW BRUNSWICK") ~ "Atlantic provinces",
+  GEO_PRV == "QUEBEC" ~ "Quebec",
+  GEO_PRV == "ONTARIO" ~ "Ontario",
+  GEO_PRV %in% c("MANITOBA", "SASKATCHEWAN", "ALBERTA") ~ "Prairies",
+  GEO_PRV == "BRITISH COLUMBIA" ~ "British Columbia",
+  GEO_PRV %in% c("YUKON", "NORTHWEST TERRITORIES") ~ "Yukon/ Northwest Territories",
+  TRUE ~ NA_character_
+)) %>%
+ mutate(REGION = factor(REGION, levels = c("Quebec", "Ontario", "Atlantic provinces","Prairies", "British Columbia", "Yukon/ Northwest Territories"), ordered = FALSE))
+
+```
+
+
+```{r}
+
+# Merge data2 (main analytic file) with bootstrap weights (bsw) by respondent ID
+# keep all rows from data2
+data_merged <- merge(data2, bsw, by = "ADM_RNO", all.x = TRUE)
+
+# Replicate-weight design using BSW1–BSW1000
+cchs_design <- svrepdesign(
+  weights    = ~WTS_M,
+  repweights = data_merged[, paste0("BSW", 1:1000)], # by name and not column position
+  type       = "bootstrap",
+  data       = data_merged,
+  combined.weights = TRUE
+)
+
+# Create a constant variable = 1 for everyone.
+# The weighted total of this variable is the total population (sum of weights).
+cchs_design <- update(cchs_design, all_one = 1)
+
+# Total weighted population represented by the analytic sample, with 95% CI
+total_pop <- svytotal(~all_one, cchs_design)
+total_pop          # point estimate
+confint(total_pop) # 95% CI
+```
+
+```{r}
+# Convert total_pop into a numeric scalar for proportions
+total_pop_scalar <- as.numeric(total_pop)
+total_pop_scalar
+
+```
+
+```{r}
+# Variable distribution checks (unweighted)
+# Purpose: Confirm recodes and category levels
+
+vars_to_check <- c(
+  "DHH_SEX",                 # Sex
+  "DHHGAGE",                 # Age group
+  "GEO_PRV",                 # Province
+  "EHG2DVH3",                # Education
+  "INCDGHH",                 # Household income
+  "DHHGMS",                  # Marital status
+  "SDCDGCB",                 # Country of birth
+  "chronic_condition_number",# Number of chronic conditions
+  "PHC_020",                 # Has regular healthcare provider
+  "INS_005",                 # Prescription drug insurance coverage
+  "GEN_005",                 # Overall perceived health
+  "GENDVMHI",                # Perceived mental health
+  "GENDVSWL",                # Life satisfaction
+  "DHH_OWN",                 # Home ownership
+  "SDCDGCGT",                # Race / ethnicity
+  "SDC_035",                 # Sexual orientation
+  "REGION",                  # Region (derived)
+  "muscu",                   # Musculoskeletal disorder
+  "respiratory",             # Respiratory disorder
+  "cardiometabolic",         # Cardiometabolic disorder
+  "neurologic_pain",         # Neurologic / pain disorder
+  "mental_health",           # Mental health disorder
+  "cancer"                   # Cancer
+)
+
+# Display frequency tables
+lapply(data_merged[vars_to_check], table, useNA = "ifany")
+```
+
+
+```{r}
+# Function to get totals + CIs + proportions for one variable
+get_totals_props <- function(var, design, total_N) {
+  f  <- as.formula(paste0("~", var))
+  tt <- svytotal(f, design, na.rm = TRUE)
+  ci <- confint(tt)
+
+  data.frame(
+    variable    = var,
+    level       = names(tt),
+    total       = as.numeric(tt),
+    total_low   = ci[, 1],
+    total_upp   = ci[, 2],
+    prop        = as.numeric(tt)    / total_N,
+    prop_low    = ci[, 1]           / total_N,
+    prop_upp    = ci[, 2]           / total_N
+  )
+}
+
+# Apply to all variables in vars_for_table
+descriptives_list <- lapply(
+  vars_to_check,
+  get_totals_props,
+  design  = cchs_design,
+  total_N = total_pop_scalar
+)
+
+# Combine into one data frame. Check the environment object for numbers
+descriptives <- do.call(rbind, descriptives_list)
+
+# Example of individual check
+subset(descriptives, variable == "DHH_SEX")
+
+```
+
+
+```{r}
+# PROPORTTION PER CRNA
+#sex
+
+cchs_srvyr <- as_survey_rep(cchs_design)
+
+crna_by_sex <- cchs_srvyr %>%
+  filter(DHH_SEX %in% c("Female", "Male")) %>%
+  group_by(DHH_SEX) %>%
+  summarize(
+    prop = survey_mean(PEX_090 == "Yes", vartype = "ci"),
+    .groups = "drop"
+  ) %>%
+  mutate(across(c(prop, prop_low, prop_upp), ~ round(.x * 100, 1)))
+
+```
+
+
+```{r}
+# Proportion with PEX_090 == "Yes" within levels of one variable, as % + 95% CI
+get_crna_by_var <- function(var, design, digits = 1) {
+  f_group <- as.formula(paste0("~", var))
+
+  by_res <- svyby(
+    ~as.numeric(PEX_090 == "Yes"),
+    f_group,
+    design,
+    svymean,
+    na.rm      = TRUE,
+    keep.names = TRUE
+  )
+
+  # by_res has: var, estimate, se
+  est <- as.numeric(by_res[, 2])
+  se  <- as.numeric(by_res[, 3])
+
+  lower <- est - 1.96 * se
+  upper <- est + 1.96 * se
+
+  # convert to percentages
+  est_pct   <- est   * 100
+  lower_pct <- lower * 100
+  upper_pct <- upper * 100
+
+  # rounded values
+  est_r   <- round(est_pct,   digits)
+  low_r   <- round(lower_pct, digits)
+  upp_r   <- round(upper_pct, digits)
+
+  # nice "x.x (L–U)" string for tables
+  ci_str <- sprintf("%0.*f (%0.*f–%0.*f)", 
+                    digits, est_r,
+                    digits, low_r,
+                    digits, upp_r)
+
+  data.frame(
+    variable      = var,
+    level         = by_res[[var]],
+    prop_yes_pct  = est_r,
+    prop_yes_low  = low_r,
+    prop_yes_upp  = upp_r,
+    prop_yes_ci   = ci_str,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Apply to the full variable list in one go, and view in the environment
+crna_by_all <- do.call(
+  rbind,
+  lapply(vars_to_check, get_crna_by_var, design = cchs_design)
+)
+```
+
+
+```{r}
+# Example of viewing individual CRNA proportions per variable
+subset(crna_by_all, variable == "DHH_SEX") # sex
+subset(crna_by_all, variable == "INCDGHH") # income
+subset(crna_by_all, variable == "REGION") # province of residence
+```
+
+
+```{r}
+# Data partition for machine learning modelling analyses
+set.seed(2025)
+data_split <- initial_split(data_merged, prop = 0.75, strata = PEX_090)
+
+train <- training(data_split)
+test<- testing(data_split)
+
+```
+
+
+```{r}
+# Frequencies for training and testing cohort (pre-imputation)
+lapply(train[vars_to_check], table, useNA = "ifany")
+
+lapply(test[vars_to_check], table, useNA = "ifany")
+
+```
+
+```{r}
+# Subset the survey design
+
+# Train-only survey design
+cchs_design_train <- subset(cchs_design, ADM_RNO %in% train$ADM_RNO)
+
+# Test-only survey design
+cchs_design_test  <- subset(cchs_design, ADM_RNO %in% test$ADM_RNO)
+
+```
+
+
+```{r}
+# Get weighted totals for train and test
+cchs_design_train <- update(cchs_design_train, all_one = 1)
+cchs_design_test  <- update(cchs_design_test,  all_one = 1)
+
+total_train  <- svytotal(~all_one, cchs_design_train)
+total_test   <- svytotal(~all_one, cchs_design_test)
+
+total_train_scalar <- as.numeric(total_train)
+total_test_scalar  <- as.numeric(total_test)
+```
+
+```{r}
+# Resuse the previous function for descriptives
+
+descriptives_train <- do.call(
+  rbind,
+  lapply(
+    vars_to_check,
+    get_totals_props,
+    design  = cchs_design_train,
+    total_N = total_train_scalar
+  )
+)
+
+descriptives_test <- do.call(
+  rbind,
+  lapply(
+    vars_to_check,
+    get_totals_props,
+    design  = cchs_design_test,
+    total_N = total_test_scalar
+  )
+)
+
+```
+
+
+```{r}
+set.seed(2025)
+# Impute training data
+train_impute <- train %>% select(PEX_090, DHH_SEX, DHHGAGE, EHG2DVH3, INCDGHH, DHHGMS,GEN_005, 
+                                 SDCDGCB, SDCDGCGT, chronic_condition_number, PHC_020, INS_005,GENDVMHI, GENDVSWL,
+                                 REGION, DHH_OWN, SDC_035,
+                                 muscu, respiratory, cardiometabolic, neurologic_pain, mental_health, cancer, WTS_M)
+
+  
+  
+# Define the recipe for imputation
+impute_recipe_train <- 
+  recipe(PEX_090 ~ ., data = train_impute) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_impute_bag(all_predictors())
+
+# Prep the recipe
+prep_impute <- prep(impute_recipe_train, training = train_impute)
+
+# Bake (apply) the imputation
+train_imputed_data <- bake(prep_impute, new_data = NULL)
+
+# Check missingness after imputation
+sum(is.na(train_imputed_data))
+```
+
+```{r}
+miss_summary(train_impute)
+mcar_test(train_impute)
+
+miss_var_summary(train_impute)
+
+```
+
+
+```{r}
+set.seed(2025)
+# Impute training data
+test_impute <- test %>% select(PEX_090, DHH_SEX, DHHGAGE, EHG2DVH3, INCDGHH, DHHGMS, GEN_005, 
+                                 SDCDGCB, SDCDGCGT, chronic_condition_number, PHC_020, INS_005,GENDVMHI, GENDVSWL,
+                                 REGION, DHH_OWN, SDC_035, 
+                                 muscu, respiratory, cardiometabolic, neurologic_pain, mental_health, cancer, WTS_M)
+
+
+# Check missingness in testing cohort
+miss_summary(test_impute)
+mcar_test(test_impute)
+miss_var_summary(test_impute)  
+  
+# Define the recipe for imputation
+impute_recipe_test <- 
+  recipe(PEX_090 ~ ., data = test_impute) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_impute_bag(all_predictors())
+
+# Prep the recipe
+prep_test_impute <- prep(impute_recipe_test, training = test_impute)
+
+# Bake (apply) the imputation
+test_imputed_data <- bake(prep_test_impute, new_data = NULL)
+
+# check for missingness after imputation
+sum(is.na(test_imputed_data))
+```
+
+
+
+```{r}
+# Select variables of interest. Removing those of 'downstream consequences'. Total of 19 candidate predictors
+
+train_variables <- train_imputed_data %>% select(PEX_090,DHH_SEX, DHHGAGE, EHG2DVH3, INCDGHH, DHHGMS,
+                                 SDCDGCB, SDCDGCGT, chronic_condition_number, 
+                          PHC_020, INS_005,REGION, DHH_OWN, SDC_035, 
+                                 muscu, respiratory, cardiometabolic, 
+                          neurologic_pain, mental_health, cancer, WTS_M)
+
+
+test_variables <- test_imputed_data %>% select(PEX_090,DHH_SEX, DHHGAGE, EHG2DVH3, INCDGHH, DHHGMS,
+                                 SDCDGCB, SDCDGCGT, chronic_condition_number, 
+                          PHC_020, INS_005,REGION, DHH_OWN, SDC_035, 
+                                 muscu, respiratory, cardiometabolic, 
+                          neurologic_pain, mental_health, cancer, WTS_M)
+
+
+```
+
+```{r}
+set.seed(2025)
+
+library(doParallel)
+
+# parallel setup 
+nc <- parallel::detectCores(logical = TRUE)
+cl <- parallel::makeCluster(max(1, nc - 2))
+registerDoParallel(cl)
+on.exit({
+  try(parallel::stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+
+# recipe
+rf_recipe <- 
+  recipe(PEX_090 ~ ., data = train_variables) %>%
+  update_role(WTS_M, new_role = "case_weight")
+
+
+# specify model
+rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 1500) %>%
+  set_engine("ranger", 
+             importance = "permutation", 
+             splitrule = "hellinger") %>% set_mode("classification")
+
+
+#RF Workflow
+rf_workflow <- 
+  workflow() %>%
+  add_recipe(rf_recipe) %>%
+  add_model(rf_spec)
+
+#set tuning grid and resampling
+folds <- vfold_cv(train_imputed_data, v = 5, repeats =3)
+
+rf_grid <- expand_grid(
+  mtry  = c(5, 7, 9, 11),
+  min_n = c(50, 100, 150, 200)
+)
+
+# Tuning
+rf_tune_results <- 
+  tune_grid(
+   rf_workflow,
+    resamples = folds,
+    grid = rf_grid,
+    metrics = metric_set(mn_log_loss, roc_auc),
+   control= control_grid(save_pred = FALSE)
+  )
+
+collect_metrics(rf_tune_results) #%>% filter(.metric == "roc_auc")
+#autoplot(rf_tune_results)
+
+# finalize the workflow with the best parameter
+best_rf <- select_best(rf_tune_results, metric = "mn_log_loss")
+final_rf_workflow <- finalize_workflow(rf_workflow, best_rf)
+
+#fit the final model
+final_rf_fit <- fit(final_rf_workflow, data = train_imputed_data)
+
+vip(final_rf_fit, num_features = 20)
+
+# Stop cluster
+stopCluster(cl)
+registerDoSEQ()
+```
+
+```{r}
+library(doParallel)
+cores <- parallel::detectCores() - 2
+cl <- makeCluster(cores)
+registerDoParallel(cl)
+
+# Recipe
+set.seed(2025)
+train_subset <- train_variables %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, INCDGHH, mental_health, WTS_M)
+
+train_subset$PEX_090 <- factor(train_subset$PEX_090, levels = c("No", "Yes"))
+
+
+rf_recipe2 <- 
+  recipe(PEX_090 ~ ., data = train_subset) %>%
+  update_role(WTS_M, new_role = "case_weight")
+
+rf_spec2 <- rand_forest(mtry = tune(), min_n = tune(), trees = 2500) %>%
+  set_engine("ranger", 
+             importance = "permutation", 
+             splitrule = "hellinger", 
+             case.weights = "WTS_M") %>%
+  set_mode("classification")
+
+
+#RF Workflow
+rf_workflow2 <- 
+  workflow() %>%
+  add_recipe(rf_recipe2) %>%
+  add_model(rf_spec2)
+
+
+rf_grid2 <- expand_grid(
+  mtry  = c(2,3,4,5),
+  min_n = c(200, 400, 600, 800)
+)
+
+#set tuning grid and resampling
+folds2 <- vfold_cv(train_subset, v = 5, repeats =3)
+
+
+# Tunining
+rf_tune_results2 <- 
+  tune_grid(
+   rf_workflow2,
+    resamples = folds2,
+    grid = rf_grid2,
+    metrics = metric_set(mn_log_loss, roc_auc),
+   control= control_grid(save_pred = FALSE)
+  )
+
+collect_metrics(rf_tune_results2) %>% filter(.metric == "mn_log_loss")
+autoplot(rf_tune_results2)
+
+# finalize the workflow with the best parameter
+best_rf2 <- select_best(rf_tune_results2, metric = "mn_log_loss")
+final_rf_workflow2 <- finalize_workflow(rf_workflow2, best_rf2)
+
+#fit the final model
+final_rf_fit2 <- fit(final_rf_workflow2, data = train_subset)
+
+vip(final_rf_fit2)
+
+
+# Stop cluster
+stopCluster(cl)
+registerDoSEQ()
+```
+
+
+```{r}
+# Get weighted AUC values in the test cohort
+set.seed(2025)
+
+# Subset test data to match variables used in training
+test_subset <- test_imputed_data %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, INCDGHH, mental_health, WTS_M)
+
+test_subset$PEX_090  <- factor(test_subset$PEX_090,  levels = c("No", "Yes"))
+
+# Predict probabilities on test data using final model
+rf_tidy_preds <- predict(final_rf_fit2, new_data = test_subset, type = "prob") %>%
+  bind_cols(test_subset %>% select(PEX_090, WTS_M))  # Use test_subset, not train_subset
+
+
+library(WeightedROC)
+
+guess <- rf_tidy_preds$.pred_Yes
+label <- ifelse(rf_tidy_preds$PEX_090 == "Yes", 1, 0)
+wts   <- test_subset$WTS_M  # ensure same length/order
+
+rf_tidy_roc_result <- WeightedROC(guess, label, weight = wts)
+auc_weighted <- WeightedAUC(rf_tidy_roc_result)
+cat("Weighted AUC =", auc_weighted, "\n")
+
+# Plot weighted ROC
+# Plot weighted ROC
+plot(rf_tidy_roc_result$FPR, rf_tidy_roc_result$TPR,
+     type = "l",
+     col = "#2c7bb6",
+     lwd = 2,
+     xlab = "Weighted False Positive Rate",
+     ylab = "Weighted True Positive Rate",
+     main = "Weighted ROC Curve")
+
+abline(0, 1, lty = 2, col = "gray50")
+
+```
+
+
+```{r}
+
+# Weighted ROC and AUC (already done)
+guess <- rf_tidy_preds$.pred_Yes
+label <- ifelse(rf_tidy_preds$PEX_090 == "Yes", 1, 0)
+wts   <- test_subset$WTS_M
+
+rf_tidy_roc_result <- WeightedROC(guess, label, weight = wts)
+auc_weighted <- WeightedAUC(rf_tidy_roc_result)
+cat("Weighted AUC =", auc_weighted, "\n")
+
+# Bootstrap CI for Weighted AUC
+
+set.seed(2025)
+B <- 1000
+auc_boot <- replicate(B, {
+  idx <- sample(seq_along(label), replace = TRUE)
+  wAUC <- WeightedAUC(WeightedROC(guess[idx], label[idx], weight = wts[idx]))
+  wAUC
+})
+
+ci <- quantile(auc_boot, probs = c(0.025, 0.975))
+cat("Weighted AUC 95% CI:", round(ci[1], 3), "-", round(ci[2], 3), "\n")
+
+```
+
+```{r}
+set.seed(2025)
+
+# Set up parallel backend
+library(doParallel)
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+# RECIPE
+
+glmnet_recipe <- recipe(PEX_090 ~ ., data = train_variables) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+  # Note: glmnet automatically standardizes predictors, so
+  # step_normalize() is not required.
+
+# MODEL SPECIFICATION
+glmnet_spec <- logistic_reg(
+  penalty = tune(),
+  mixture = tune()   # 1 = LASSO, 0 = Ridge
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# WORKFLOW
+glmnet_workflow <- workflow() %>%
+  add_recipe(glmnet_recipe) %>%
+  add_model(glmnet_spec)
+
+
+# CROSS-VALIDATION
+
+folds <- vfold_cv(train_imputed_data, v = 5, repeats = 3)
+
+# TUNING GRID
+# penalty range = 10^-4 to 10^1
+# mixture range = 0.1 to 1 (avoids pure ridge)
+
+glmnet_grid <- grid_regular(
+  penalty(range = c(-4, 2), trans = log10_trans()),
+  mixture(range = c(0.1, 1)),
+  levels = 100
+)
+
+# TUNING
+
+glmnet_tune <- tune_grid(
+  glmnet_workflow,
+  resamples = folds,
+  grid = glmnet_grid,
+  metrics = metric_set(mn_log_loss),
+  control = control_grid(
+    parallel_over = "resamples",
+    save_pred = FALSE,     # prevents large prediction objects
+    allow_par = TRUE
+  )
+)
+
+# FINALIZE + FIT
+
+best_glmnet <- select_best(glmnet_tune, metric = "mn_log_loss")
+final_glmnet_workflow <- finalize_workflow(glmnet_workflow, best_glmnet)
+
+final_glmnet_fit <- fit(final_glmnet_workflow, data = train_variables)
+
+# CHECK METRICS + PLOT
+collect_metrics(glmnet_tune) %>% filter(.metric == "mn_log_loss")
+autoplot(glmnet_tune)
+
+vip(final_glmnet_fit, 38)
+
+
+
+enet_imp <- final_glmnet_fit %>%
+  extract_fit_parsnip() %>%
+  vip::vi(
+  )
+
+final_glmnet_fit %>%
+  vip(num_features = 38) +
+  labs(title = "Variable Importance for Elastic Net Model")
+
+```
+
+
+```{r}
+# Variable Importance (Collapsed Across Levels)
+coefs <- tidy(final_glmnet_fit) %>%
+  filter(term != "(Intercept)")
+
+coefs_summary <- coefs %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = sum(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+
+# --- High-level variable labels ---
+pretty_labels_map <- c(
+  "DHHGAGE" = "Age",
+  "INCDGHH" = "Household income",
+  "INS_005" = "Insurance coverage",
+  "REGION" = "Region of residence",
+  "chronic_condition_number" = "Number of chronic conditions",
+  "DHH_SEX" = "Sex",
+  "SDCDGCGT" = "Race/ethnicity",
+  "SDC_035" = "Sexual orientation",
+  "DHHGMS" = "Marital status",
+  "EHG2DVH3" = "Education level",
+  "SDCDGCB" = "Country of birth",
+  #"SDC_015" = "Indigenous identity",
+  "PHC_020" = "Has regular healthcare provider",
+  "GEN_005" = "Perceived overall health",
+  "GENDVMHI" = "Perceived mental health",
+  "GENDVSWL" = "Life satisfaction",
+  "DHH_OWN" = "Home ownership",
+  "muscu" = "Musculoskeletal conditions",
+  "respiratory" = "Respiratory conditions",
+  "cardiometabolic" = "Cardiometabolic condiitons",
+  "neurologic_pain" = "Neurologic/pain-related conditions",
+  "mental_health" = "Mental health conditions`",
+  "cancer" = "Cancer"
+)
+
+# --- Collapse by last underscore ---
+coefs_summary <- tidy(final_glmnet_fit) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    variable = sub("_[^_]+$", "", term),  # remove only the last underscore part
+    variable = recode(variable, !!!pretty_labels_map, .default = variable)
+  ) %>%
+  group_by(variable) %>%
+  summarise(
+    abs_coef = mean(abs(estimate), na.rm = TRUE),   # average instead of sum
+    n_levels = n()                                  # number of dummy levels
+  ) %>%
+  arrange(desc(abs_coef))
+
+# --- Plot ---
+importance_plot <- coefs_summary %>%
+  slice_max(abs_coef, n = 20) %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "",
+    y = "Mean |Penalized Coefficient|",
+    title = "Elastic Net Variable Importance"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+print(importance_plot)
+
+ggsave("importance_plot.pdf", importance_plot, width = 8, height = 6, dpi = 300, device = cairo_pdf)
+
+
+```
+
+```{r}
+set.seed(2025)
+
+# Parallel backend
+
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+glm_train_subset <- train_variables %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, INCDGHH, mental_health, WTS_M)
+
+glm_train_subset$PEX_090 <- factor(glm_train_subset$PEX_090, levels = c("No", "Yes"))
+
+glmnet_recipe2 <- recipe(
+  PEX_090 ~ DHHGAGE + INCDGHH + INS_005 + chronic_condition_number + mental_health + WTS_M, 
+  data = glm_train_subset
+) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+
+
+# Model specification
+glmnet_spec2 <- logistic_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow
+
+glmnet_workflow2 <- workflow() %>%
+  add_recipe(glmnet_recipe2) %>%
+  add_model(glmnet_spec2)
+
+
+# Grid for tuning
+glmnet_grid2 <- grid_regular(
+  penalty(range = c(-4, 2)),   # 1e-4 to 10
+  mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+  levels = 100
+)
+
+# Tune in parallel
+glmnet_tune2 <- tune_grid(
+  glmnet_workflow2,
+  resamples = folds,
+  grid = glmnet_grid2,
+  metrics = metric_set(mn_log_loss),
+  control = control_grid(
+    parallel_over = "resamples",
+    save_pred = FALSE,
+    allow_par = TRUE
+  )
+)
+
+# Select best model
+best_glmnet2 <- select_best(glmnet_tune2, metric = "mn_log_loss")
+
+# Finalize and fit model
+final_glmnet_workflow2 <- finalize_workflow(glmnet_workflow2, best_glmnet2)
+final_glmnet_fit2 <- fit(final_glmnet_workflow2, data = glm_train_subset)
+
+# Variable-level importance
+glmnet_importance2 <- tidy(final_glmnet_fit2) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = mean(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet_importance2)
+
+# Plot top predictors
+glmnet_importance2 %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities
+glmnet_preds <- predict(final_glmnet_fit2, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+
+# Weighted ROC computation
+glm_weighted_roc <- WeightedROC(
+  guess  = glmnet_preds$.pred_Yes,
+  label  = as.integer(glmnet_preds$PEX_090 == "Yes"),
+  weight = glmnet_preds$WTS_M
+)
+
+# Weighted AUC
+glm_weighted_auc <- WeightedAUC(glm_weighted_roc)
+cat("Weighted AUC:", glm_weighted_auc, "\n")
+
+# Weighted ROC plot
+plot(glm_weighted_roc$FPR, glm_weighted_roc$TPR, type = "l", col = "#2c7bb6", lwd = 2,
+     xlab = "Weighted False Positive Rate",
+     ylab = "Weighted True Positive Rate",
+     main = paste0("Weighted ROC Curve (AUC = ", round(glm_weighted_auc, 3), ")"))
+abline(0, 1, lty = 2, col = "gray50")
+
+```
+
+
+```{r}
+# Bootstrap CI for Weighted AUC
+
+set.seed(2025)
+B <- 1000
+auc_boot <- replicate(B, {
+  idx <- sample(seq_along(glmnet_preds$.pred_Yes), replace = TRUE)
+  WeightedAUC(WeightedROC(
+    guess  = glmnet_preds$.pred_Yes[idx],
+    label  = as.integer(glmnet_preds$PEX_090[idx] == "Yes"),
+    weight = glmnet_preds$WTS_M[idx]
+  ))
+})
+
+ci <- quantile(auc_boot, probs = c(0.025, 0.975))
+cat("Weighted AUC 95% CI:", round(ci[1], 3), "-", round(ci[2], 3), "\n")
+
+```
+
+```{r}
+# Parallel backend setup
+
+library(tidymodels)
+library(doParallel)
+library(vip)
+
+set.seed(2025)
+
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+# Data & Recipe
+lgb_recipe <- recipe(PEX_090 ~ ., data = train_variables) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_mutate_at(all_nominal_predictors(), fn = as.factor)
+
+# Model specification
+lgb_spec <- boost_tree(
+  trees = 2000,
+  learn_rate = tune(),
+  tree_depth = tune(),
+  loss_reduction = tune(),
+  min_n = tune()
+) %>%
+  set_engine("lightgbm") %>%
+  set_mode("classification")
+
+# Workflow
+lgb_workflow <- workflow() %>%
+  add_recipe(lgb_recipe) %>%
+  add_model(lgb_spec)
+
+# Parameter grid (new API)
+lgb_params <- parameters(
+  learn_rate(),
+  tree_depth(),
+  loss_reduction(),
+  min_n()
+)
+
+lgb_grid <- grid_space_filling(
+  lgb_params,
+  size = 50,
+  original = TRUE
+)
+
+# Tune with case weights & parallel processing
+ctrl_light <- control_grid(
+  save_pred = FALSE,
+  extract = NULL,
+  save_workflow = FALSE,
+  parallel_over = "resamples",
+  allow_par = TRUE
+)
+
+lgb_tune <- tune_grid(
+  lgb_workflow,
+  resamples = folds,
+  grid = lgb_grid,
+  metrics = metric_set(mn_log_loss),
+  control = ctrl_light
+)
+
+# Select best model and refit
+
+best_lgb <- select_best(lgb_tune, metric = "mn_log_loss")
+final_lgb <- finalize_workflow(lgb_workflow, best_lgb)
+
+final_lgb_fit <- fit(final_lgb, data = train_imputed_data)
+
+
+# Variable importance
+vip(final_lgb_fit, num_features = 19)
+```
+
+
+
+
+```{r}
+# LightGBM model tuning with selected predictors (Model 2)
+
+set.seed(2025)
+# Parallel backend setup
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+# Data subset
+lgb_train_subset2 <- train_variables %>%
+  select(PEX_090, INS_005, DHHGAGE, INCDGHH, mental_health, chronic_condition_number, WTS_M)
+
+# Recipe with case weights
+lgb_recipe2 <- recipe(
+  PEX_090 ~ INS_005 + DHHGAGE + INCDGHH + mental_health + chronic_condition_number + WTS_M,
+  data = lgb_train_subset2
+) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_mutate_at(all_nominal_predictors(), fn = as.factor)
+
+# Model specification-
+lgb_spec2 <- boost_tree(
+  trees = 2000,
+  learn_rate = tune(),
+  tree_depth = tune(),
+  loss_reduction = tune(),
+  min_n = tune()
+) %>%
+  set_engine("lightgbm") %>%
+  set_mode("classification")
+
+# Workflow
+lgb_workflow2 <- workflow() %>%
+  add_recipe(lgb_recipe2) %>%
+  add_model(lgb_spec2)
+
+# Parameter grid
+lgb_params2 <- parameters(
+  learn_rate(),
+  tree_depth(),
+  loss_reduction(),
+  min_n()
+)
+
+lgb_grid2 <- grid_space_filling(
+  lgb_params2,
+  size = 50,
+  original = TRUE
+)
+
+#  Tune model with case weights
+ctrl_light2 <- control_grid(
+  save_pred = FALSE,
+  extract = NULL,
+  save_workflow = FALSE,
+  parallel_over = "resamples",
+  allow_par = TRUE
+)
+
+lgb_folds <- vfold_cv(lgb_train_subset2, v = 5, repeats = 3)
+
+lgb_tune2 <- tune_grid(
+  lgb_workflow2,
+  resamples = lgb_folds,
+  grid = lgb_grid2,
+  metrics = metric_set(mn_log_loss),
+  control = ctrl_light2
+)
+
+
+
+```
+
+
+```{r}
+best_lgb2 <- select_best(lgb_tune2, metric = "mn_log_loss")
+final_lgb2 <- finalize_workflow(lgb_workflow2, best_lgb2)
+
+final_lgb_fit2 <- fit(final_lgb2, data = train_imputed_data)
+
+```
+
+
+
+```{r}
+# Weighted ROC plot
+library(WeightedROC)
+
+lgb_preds <- predict(final_lgb_fit2, new_data = test_variables, type = "prob") %>%
+  bind_cols(test_variables %>% select(PEX_090, WTS_M))
+
+lgb_final_roc_df <- WeightedROC(
+  guess = lgb_preds$.pred_Yes,
+  label = as.integer(lgb_preds$PEX_090 == "Yes"),
+  weight = lgb_preds$WTS_M
+)
+
+# Weighted AUC
+auc_val <- WeightedAUC(lgb_final_roc_df)
+cat("Weighted AUC =", round(auc_val, 3), "\n")
+
+# Bootstrap confidence interval for Weighted AUC
+set.seed(2025)
+B <- 1000  # number of bootstrap replicates
+
+guess <- lgb_preds$.pred_Yes
+label <- as.integer(lgb_preds$PEX_090 == "Yes")
+wts   <- lgb_preds$WTS_M
+
+auc_boot <- replicate(B, {
+  idx <- sample(seq_along(label), replace = TRUE)
+  roc_boot <- WeightedROC(guess[idx], label[idx], weight = wts[idx])
+  WeightedAUC(roc_boot)
+})
+
+# Mean AUC and 95% CI
+auc_mean <- mean(auc_boot, na.rm = TRUE)
+auc_ci <- quantile(auc_boot, probs = c(0.025, 0.975), na.rm = TRUE)
+
+cat("Weighted AUC =", round(auc_mean, 3), "\n")
+cat("95% Bootstrap CI:", round(auc_ci[1], 3), "-", round(auc_ci[2], 3), "\n")
+
+
+# Plot Weighted ROC
+
+plot(
+  lgb_final_roc_df$FPR, lgb_final_roc_df$TPR, type = "l", col = "#1b9e77", lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0("Weighted ROC Curve (LightGBM)\nAUC = ",
+                round(auc_mean, 3), " [95% CI ", round(auc_ci[1], 3), "–", round(auc_ci[2], 3), "]")
+)
+abline(0, 1, col = "gray50", lty = 2)
+
+# visualize bootstrap distribution
+hist(
+  auc_boot, breaks = 30, col = "#1b9e77", border = "white",
+  main = "Bootstrap Distribution of Weighted AUC (LightGBM)",
+  xlab = "Weighted AUC"
+)
+abline(v = auc_mean, col = "#d95f02", lwd = 2)
+abline(v = auc_ci, col = "gray30", lty = 2)
+
+```
+
+
+```{r}
+library(CalibrationCurves)
+# Weighted calibration curve with confidence intervals
+rf_cal_result <- valProbggplot(
+  p        = rf_tidy_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(rf_tidy_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = rf_tidy_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = TRUE,                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(rf_cal_result$calibration)
+print(rf_cal_result)
+#ggsave("rf_calibration_plot.pdf", rf_cal_result, width = 8, height = 6, dpi = 300, device = cairo_pdf)
+```
+
+```{r}
+# Weighted calibration curve with confidence intervals
+glm_cal_result <- valProbggplot(
+  p        = glmnet_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm_cal_result)
+
+```
+
+
+```{r}
+# Light GBM
+# Weighted Calibration Analysis (CalibrationCurves)
+
+# Weighted calibration curve with confidence intervals
+lgbm_cal_result <- valProbggplot(
+  p        = lgb_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(lgb_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = lgb_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,                               # plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+   roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0,0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+print(lgbm_cal_result)
+```
+
+```{r}
+# Extract the underlying glmnet engine
+glmnet_fit_engine <- final_glmnet_fit2 %>% 
+  extract_fit_engine()
+
+# View coefficients at the best λ (the penalty value selected)
+coef(glmnet_fit_engine)
+
+```
+
+
+```{r}
+library(broom)
+
+final_glmnet_coefs <- tidy(final_glmnet_fit2)
+
+head(final_glmnet_coefs)
+
+
+```
+
+
+
+
+```{r}
+set.seed(2025)
+B <- 1000  # number of bootstrap resamples
+
+# Bootstrap loop
+boot_coefs <- replicate(B, {
+  # Resample the training data
+  idx <- sample(seq_len(nrow(glm_train_subset)), replace = TRUE)
+  boot_data <- glm_train_subset[idx, ]
+  
+  # Fit model on bootstrap sample
+  boot_fit <- fit(final_glmnet_workflow2, data = boot_data)
+  
+  # Extract coefficients (excluding intercept)
+  coef_df <- tidy(boot_fit) %>%
+    filter(term != "(Intercept)") %>%
+    pull(estimate)
+  
+  coef_df
+}, simplify = "matrix")
+
+# Compute summary statistics
+glmnet_ci_df <- tidy(final_glmnet_fit2) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    beta_mean  = apply(boot_coefs, 1, mean),
+    beta_lower = apply(boot_coefs, 1, quantile, probs = 0.025),
+    beta_upper = apply(boot_coefs, 1, quantile, probs = 0.975)
+  )
+
+# View results
+glmnet_ci_df
+```
+
+```{r}
+glmnet_label <- c(
+  "DHHGAGE_X.65" = "Age ≥65",
+  "chronic_condition_number_X.4" = "≥4 chronic conditions",
+  "chronic_condition_number_X0" = "0 chronic conditions",
+  "DHHGAGE_X.34" = "Age ≤34",
+  "INCDGHH_X..80.000" = "Income ≥$80K",
+  "INCDGHH_X..20.000" = "Income <$20K",
+  "INS_005_Yes" = "Has insurance",
+  "INS_005_No" = "No insurance",
+  "DHHGAGE_X35.49" = "Age 35–49",
+  "INCDGHH_X.20.000..39.000" = "Income $20K–39K",
+  "chronic_condition_number_X1" = "1 chronic condition",
+  "chronic_condition_number_X2" = "2 chronic conditions",
+  "chronic_condition_number_X3" = "3 chronic conditions",
+  "INCDGHH_X.60.000..79.000" = "Income $60K–79K",
+  "INCDGHH_X.40.000..59.000" = "Income $40K–59K",
+  "DHHGAGE_X50.64" = "Age 50–64",
+  "mental_health_Yes" = "Has mental health disorder(s)",
+  "mental_health_No" = "No mental health disorder"
+)
+
+# Plot penalized coefficients (β) with direction and CI
+beta_plot <- glmnet_ci_df %>%
+  mutate(
+    pretty_label = recode(term, !!!glmnet_label, .default = term),
+    direction = ifelse(beta_mean > 0, "Increased CRNA probability", "Decreased CRNA probability")
+  ) %>%
+  mutate(pretty_label = reorder(pretty_label, beta_mean)) %>%
+  ggplot(aes(x = pretty_label, y = beta_mean, color = direction)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = beta_lower, ymax = beta_upper), width = 0.3) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray40") +
+  coord_flip() +
+  scale_color_manual(values = c("#d95f02", "#1b9e77")) +  # orange = higher CRNA, green = lower
+  labs(
+    x = "",
+    y = expression("Penalized Coefficient ("*beta*") with 95% Bootstrap CI"),
+    #title = "Bootstrap 95% Confidence Intervals for Penalized Coefficients",
+    color = ""
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+# --- Save as high-resolution PDF ---
+ggsave(
+  filename = "penalized_betas_bootstrap_CI.pdf",
+  plot = beta_plot,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  device = cairo_pdf  # ensures smooth text and curves
+)
+
+
+
+```
+
+
+```{r}
+# Get Odds Ratio, then apply the model to 500 bootstrapped samples and estimate the 95% CI
+set.seed(1234)
+B <- 500  # number of bootstrap samples
+
+boot_coefs <- replicate(B, {
+  idx <- sample(seq_len(nrow(glm_train_subset)), replace = TRUE)
+  boot_fit <- fit(final_glmnet_workflow2, data = glm_train_subset[idx, ])
+  coef_df <- tidy(boot_fit) %>%
+    filter(term != "(Intercept)") #%>%
+    #mutate(odds_ratio = exp(estimate))
+  #coef_df$odds_ratio
+}, simplify = "matrix")
+
+# Compute 95% CI from bootstrap distribution
+glmnet_ci_df <- data.frame(
+  term = tidy(final_glmnet_fit2)$term[-1],  # exclude intercept
+  or_mean = apply(boot_coefs, 1, mean),
+  or_lower = apply(boot_coefs, 1, quantile, probs = 0.025),
+  or_upper = apply(boot_coefs, 1, quantile, probs = 0.975)
+)
+
+
+
+```
+
+
+```{r}
+# Plot and save penalized ORs with 95% bootstrap CI
+
+or_plot <- glmnet_ci_df %>%
+  mutate(
+    pretty_label = recode(term, !!!glmnet_label, .default = term),
+    direction = ifelse(or_mean > 1, "Increased CRNA probability", "Decreased CRNA probability")
+  ) %>%
+  mutate(pretty_label = reorder(pretty_label, or_mean)) %>%
+  ggplot(aes(x = pretty_label, y = or_mean, color = direction)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = or_lower, ymax = or_upper), width = 0.3) +
+  geom_hline(yintercept = 1, linetype = 2, color = "gray40") +
+  coord_flip() +
+  scale_color_manual(values = c("#1b9e77", "#d95f02")) +
+  scale_y_log10(
+    breaks = c(0.5, 1, 2, 5),
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  labs(
+    x = "",
+    y = "Penalized Odds Ratio (95% Bootstrap CI)",
+    title = "Bootstrap 95% Confidence Intervals for Penalized Odds Ratios",
+    color = ""
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+# --- Save as high-resolution PDF ---
+ggsave(
+  filename = "penalized_betas_bootstrap_CI.pdf",
+  plot = or_plot,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  device = cairo_pdf  # ensures smooth text and curves
+)
+
+```
+
+
+```{r}
+# retrain elastic net model with sex and race variables
+set.seed(2025)
+
+# Parallel backend
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+# Recipe
+glmnet_recipe_sex <- recipe(
+  PEX_090 ~ DHHGAGE + INCDGHH + INS_005 + chronic_condition_number + mental_health + DHH_SEX + SDCDGCGT+ WTS_M, 
+  data = train_variables
+) %>%
+  update_role(all_of("WTS_M"), new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+# Fixed Elastic Net model (no tuning)
+glmnet_spec_sex <- logistic_reg(
+  penalty = 0.0001,   # λ value
+  mixture = 0.10909     # α value (elastic net mix)
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow 
+glmnet_workflow_sex <- workflow() %>%
+  add_recipe(glmnet_recipe_sex) %>%
+  add_model(glmnet_spec_sex)
+
+# Fit final model 
+final_glmnet_fit_sex <- fit(glmnet_workflow_sex, data = train_variables)
+
+
+# Variable-level importance
+glmnet_importance_sex <- tidy(final_glmnet_fit_sex) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = sum(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet_importance_sex)
+
+# Plot top predictors
+glmnet_importance_sex %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities on test data
+glmnet_preds_sex <- predict(final_glmnet_fit_sex, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+# Compute weighted AUC
+auc_sex <- WeightedAUC(
+  WeightedROC(
+    glmnet_preds_sex$.pred_Yes,
+    as.integer(glmnet_preds_sex$PEX_090 == "Yes"),
+    weight = glmnet_preds_sex$WTS_M
+  )
+)
+cat("Weighted AUC =", round(auc_sex, 3), "\n")
+```
+
+
+```{r}
+# Bootstrap 95% CI
+B <- 1000
+sex_auc_boot <- replicate(B, {
+  idx <- sample(nrow(glmnet_preds_sex), replace = TRUE)
+  WeightedAUC(
+    WeightedROC(
+      glmnet_preds_sex$.pred_Yes[idx],
+      as.integer(glmnet_preds_sex$PEX_090[idx] == "Yes"),
+      weight = glmnet_preds_sex$WTS_M[idx]
+    )
+  )
+})
+
+ci_sex <- quantile(sex_auc_boot, probs = c(0.025, 0.975))
+cat("Weighted AUC 95% CI:", round(ci_sex[1], 3), "-", round(ci_sex[2], 3), "\n")
+
+# ROC Plot
+roc_sex <- WeightedROC(
+  glmnet_preds_sex$.pred_Yes,
+  as.integer(glmnet_preds_sex$PEX_090 == "Yes"),
+  weight = glmnet_preds_sex$WTS_M
+)
+
+plot(
+  roc_sex$FPR, roc_sex$TPR,
+  type = "l", col = "#7570b3", lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0("Weighted ROC (Elastic Net + Sex)\nAUC = ", round(auc_sex, 3),
+                " [95% CI ", round(ci_sex[1], 3), "–", round(ci_sex[2], 3), "]")
+)
+abline(0, 1, col = "gray60", lty = 2)
+```
+
+
+```{r}
+# Weighted calibration curve with confidence intervals
+glm_sex_cal_result <- valProbggplot(
+  p        = glmnet_preds_sex$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet_preds_sex$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet_preds_sex$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm_sex_cal_result) 
+
+```
+
+
+
+# SEX + RACE + PROVINCE
+
+```{r}
+# retrain elastic net model with sex and race variables
+set.seed(2025)
+
+# Parallel backend
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+# Recipe
+glmnet_recipe_sex_pr <- recipe(
+  PEX_090 ~ DHHGAGE + INCDGHH + INS_005 + chronic_condition_number + mental_health + DHH_SEX + SDCDGCGT+ REGION + WTS_M, 
+  data = train_variables
+) %>%
+  update_role(all_of("WTS_M"), new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+# Fixed Elastic Net model (no tuning)
+glmnet_spec_sex_pr <- logistic_reg(
+  penalty = 0.0001,   # λ value
+  mixture = 0.10909     # α value (elastic net mix)
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow 
+glmnet_workflow_sex_pr <- workflow() %>%
+  add_recipe(glmnet_recipe_sex_pr) %>%
+  add_model(glmnet_spec_sex_pr)
+
+# Fit final model 
+final_glmnet_fit_sex_pr <- fit(glmnet_workflow_sex_pr, data = train_variables)
+
+
+# Variable-level importance
+glmnet_importance_sex_pr <- tidy(final_glmnet_fit_sex_pr) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = sum(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet_importance_sex_pr)
+
+# Plot top predictors
+glmnet_importance_sex_pr %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities on test data
+glmnet_preds_sex_pr <- predict(final_glmnet_fit_sex_pr, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+# Compute weighted AUC
+auc_sex_pr <- WeightedAUC(
+  WeightedROC(
+    glmnet_preds_sex_pr$.pred_Yes,
+    as.integer(glmnet_preds_sex_pr$PEX_090 == "Yes"),
+    weight = glmnet_preds_sex_pr$WTS_M
+  )
+)
+cat("Weighted AUC =", round(auc_sex_pr, 3), "\n")
+```
+
+
+```{r}
+set.seed(2025)
+# Bootstrap 95% CI
+B <- 1000
+sex_auc_boot_pr <- replicate(B, {
+  idx <- sample(nrow(glmnet_preds_sex_pr), replace = TRUE)
+  WeightedAUC(
+    WeightedROC(
+      glmnet_preds_sex_pr$.pred_Yes[idx],
+      as.integer(glmnet_preds_sex_pr$PEX_090[idx] == "Yes"),
+      weight = glmnet_preds_sex_pr$WTS_M[idx]
+    )
+  )
+})
+
+ci_sex_pr <- quantile(sex_auc_boot_pr, probs = c(0.025, 0.975))
+cat("Weighted AUC 95% CI:", round(ci_sex_pr[1], 3), "-", round(ci_sex_pr[2], 3), "\n")
+
+# ROC Plot
+roc_sex_pr <- WeightedROC(
+  glmnet_preds_sex_pr$.pred_Yes,
+  as.integer(glmnet_preds_sex_pr$PEX_090 == "Yes"),
+  weight = glmnet_preds_sex_pr$WTS_M
+)
+
+plot(
+  roc_sex_pr$FPR, roc_sex_pr$TPR,
+  type = "l", col = "#7570b3", lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0("Weighted ROC (Elastic Net + Sex)\nAUC = ", round(auc_sex_pr, 3),
+                " [95% CI ", round(ci_sex_pr[1], 3), "–", round(ci_sex_pr[2], 3), "]")
+)
+abline(0, 1, col = "gray60", lty = 2)
+```
+
+
+```{r}
+# Weighted calibration curve with confidence intervals
+glm_sex_cal_result_pr <- valProbggplot(
+  p        = glmnet_preds_sex_pr$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet_preds_sex_pr$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet_preds_sex_pr$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm_sex_cal_result_pr) 
+
+```
+
+
+```{r}
+# Training frequencies
+get_weighted_freq_ci <- function(var, design) {
+  f <- as.formula(paste0("~", var))
+  out <- svytotal(f, design, na.rm = TRUE)
+  est <- coef(out)
+  se  <- SE(out)
+  
+  ci <- data.frame(
+    Variable = var,
+    Category = names(est),
+    Estimate = round(est, 0),
+    Lower = round(est - 1.96 * se, 0),
+    Upper = round(est + 1.96 * se, 0)
+  )
+  return(ci)
+}
+
+
+freq_tables <- lapply(vars_to_check, get_weighted_freq_ci, design = train_design)
+freq_df <- do.call(rbind, freq_tables)
+
+head(freq_df)
+
+
+```
+
+# Double-check missingness
+```{r}
+# missing data summary
+miss_summary(data2)
+
+miss_var_summary(data2)
+```
+
+```{r}
+# Snapshot current environment/ version of packages
+#renv::snapshot()
+```
+
+
+
+
