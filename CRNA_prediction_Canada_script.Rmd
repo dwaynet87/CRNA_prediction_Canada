@@ -35,7 +35,7 @@ library(rsample)
 library(purrr)
 library(CalibrationCurves)
 library(bonsai)
-library(lightgbm)
+library(lightgbm) # for lightGBM model
 ```
 
 
@@ -1416,7 +1416,7 @@ coefs_summary <- coefs %>%
   arrange(desc(abs_coef))
 
 
-# --- High-level variable labels ---
+# High-level variable labels
 pretty_labels_map <- c(
   "DHHGAGE" = "Age",
   "INCDGHH" = "Household income",
@@ -1443,7 +1443,7 @@ pretty_labels_map <- c(
   "cancer" = "Cancer"
 )
 
-# --- Collapse by last underscore ---
+# Collapse by last underscore 
 coefs_summary <- tidy(final_glmnet_fit) %>%
   filter(term != "(Intercept)") %>%
   mutate(
@@ -1457,7 +1457,7 @@ coefs_summary <- tidy(final_glmnet_fit) %>%
   ) %>%
   arrange(desc(abs_coef))
 
-# --- Plot ---
+# Plot 
 importance_plot <- coefs_summary %>%
   slice_max(abs_coef, n = 20) %>%
   ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
@@ -2276,7 +2276,7 @@ glm_sex_cal_result <- valProbggplot(
 # SEX + RACE + PROVINCE
 
 ```{r}
-# retrain elastic net model with sex and race variables
+# retrain elastic net model with sex, race, and province variables
 set.seed(2025)
 
 # Parallel backend
@@ -2449,7 +2449,7 @@ head(freq_df)
 ```{r}
 library(butcher)
 
-# 1. Rebuild the model spec with fixed parameters
+# Rebuild the model spec with fixed parameters
 glmnet_spec_final <- logistic_reg(
   mode = "classification",
   penalty = 1e-4,
@@ -2457,27 +2457,43 @@ glmnet_spec_final <- logistic_reg(
 ) %>%
   set_engine("glmnet")
 
-# 2. Rebuild the workflow
+# Rebuild the workflow
 glmnet_workflow_final <- workflow() %>%
   add_model(glmnet_spec_final) %>%
   add_recipe(glmnet_recipe2)   # use your existing recipe object
 
-# 3. Fit on the full training data
+# Fit on the full training data
 final_glmnet_fit2 <- fit(glmnet_workflow_final, data = glm_train_subset)
 
-# 4. Trim the fitted object
+# Trim the fitted object
 final_glmnet_fit2_trim <- butcher(final_glmnet_fit2)
 
-# 5. Save it
+# Save it
 saveRDS(final_glmnet_fit2_trim, "elastic_net_crna_final_model.rds")
 
 
 ```
 
 ```{r}
+# double check
 predict(final_glmnet_fit2_trim, new_data = test_imputed_data, type = "prob")
 
 ```
+
+```{r}
+# Save the alternative model with sex, race, and province of residence
+#library(bundle)
+#library(butcher)
+
+# Trim unnecessary objects to reduce size
+final_glmnet_fit_sex_pr_trimmed <- final_glmnet_fit_sex_pr %>%
+  butcher()
+
+# Save model
+saveRDS(final_glmnet_fit_sex_pr_trimmed,
+        "elastic_net_model_crna_sex_race_pr.rds")
+```
+
 
 
 # Double-check missingness
