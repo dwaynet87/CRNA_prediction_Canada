@@ -6,11 +6,12 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-library(haven)
-library(tidyverse)
-library(naniar)
+library(haven) # loading data into R
+library(tidyverse) # Cleaning and data exploration
+library(butcher) # trims row data before saving final model
+library(naniar) # Data missingness
 library(dplyr)
-library(ggplot2)
+library(ggplot2) # Plots and visualizations
 library(skimr)
 library(psych)
 library(rmarkdown)
@@ -18,11 +19,11 @@ library(survey)
 library(janitor)
 library(vip)
 library(mice)
-library(ranger)
-library(caret)
+library(ranger) # Random forest
+library(caret) # ML model building
 library(VIM)
 library(srvyr)
-library(tidymodels)
+library(tidymodels) # ML model building
 library(doParallel)
 library(WeightedROC)
 library(dplyr)
@@ -882,23 +883,6 @@ subset(descriptives, variable == "DHH_SEX")
 ```
 
 
-```{r}
-# PROPORTTION PER CRNA
-#sex
-
-cchs_srvyr <- as_survey_rep(cchs_design)
-
-crna_by_sex <- cchs_srvyr %>%
-  filter(DHH_SEX %in% c("Female", "Male")) %>%
-  group_by(DHH_SEX) %>%
-  summarize(
-    prop = survey_mean(PEX_090 == "Yes", vartype = "ci"),
-    .groups = "drop"
-  ) %>%
-  mutate(across(c(prop, prop_low, prop_upp), ~ round(.x * 100, 1)))
-
-```
-
 
 ```{r}
 # Proportion with PEX_090 == "Yes" within levels of one variable, as % + 95% CI
@@ -1005,6 +989,10 @@ total_test   <- svytotal(~all_one, cchs_design_test)
 
 total_train_scalar <- as.numeric(total_train)
 total_test_scalar  <- as.numeric(total_test)
+
+confint(total_train)
+confint(total_test)
+
 ```
 
 ```{r}
@@ -1542,6 +1530,7 @@ glmnet_grid2 <- grid_regular(
   levels = 100
 )
 
+
 # Tune in parallel
 glmnet_tune2 <- tune_grid(
   glmnet_workflow2,
@@ -1789,8 +1778,6 @@ lgb_tune2 <- tune_grid(
   control = ctrl_light2
 )
 
-
-
 ```
 
 
@@ -1965,12 +1952,10 @@ coef(glmnet_fit_engine)
 
 
 ```{r}
-library(broom)
 
 final_glmnet_coefs <- tidy(final_glmnet_fit2)
 
 head(final_glmnet_coefs)
-
 
 ```
 
@@ -2460,6 +2445,40 @@ head(freq_df)
 
 
 ```
+
+```{r}
+library(butcher)
+
+# 1. Rebuild the model spec with fixed parameters
+glmnet_spec_final <- logistic_reg(
+  mode = "classification",
+  penalty = 1e-4,
+  mixture = 0.10909
+) %>%
+  set_engine("glmnet")
+
+# 2. Rebuild the workflow
+glmnet_workflow_final <- workflow() %>%
+  add_model(glmnet_spec_final) %>%
+  add_recipe(glmnet_recipe2)   # use your existing recipe object
+
+# 3. Fit on the full training data
+final_glmnet_fit2 <- fit(glmnet_workflow_final, data = glm_train_subset)
+
+# 4. Trim the fitted object
+final_glmnet_fit2_trim <- butcher(final_glmnet_fit2)
+
+# 5. Save it
+saveRDS(final_glmnet_fit2_trim, "elastic_net_crna_final_model.rds")
+
+
+```
+
+```{r}
+predict(final_glmnet_fit2_trim, new_data = test_imputed_data, type = "prob")
+
+```
+
 
 # Double-check missingness
 ```{r}
