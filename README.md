@@ -58,9 +58,7 @@ Load the trained model:
 ```r
 # final model with 5 predictors
 model <- readRDS("folder/elastic_net_crna_final_model.rds")
-```
 
-```r
 # Alternative model incorporating sex, race, and province of residence variables
 model <- readRDS("folder/elastic_net_crna_sex_race_pr.rds")
 ```
