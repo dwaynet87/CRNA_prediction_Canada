@@ -1,9 +1,9 @@
-## Project Title: Development and validation of a machine learning prediction model for cost-related medication nonadherence in Canada:a cross-sectional analysis of national survey data.
+## Project Title: Development and validation of a machine learning prediction model for cost-related medication nonadherence in Canada: a cross-sectional analysis of national survey data.
 
 ## Description
-This repository contains the analytic code and trained prediction model for the study:Tucker DR, Dodani D, De Vera MA. Development and validation of a machine learning prediction model for cost-related medication nonadherence in Canada: a cross-sectional analysis of national survey data.
+This repository contains the analytic code and trained prediction models for the study:Tucker DR, Thomas M, Dodani D, Law M, De Vera MA. Development and validation of a machine learning prediction model for cost-related medication nonadherence in Canada: a cross-sectional analysis of national survey data.
 
-The goal of the study was to develop and internally validate machine learning models to estimate the probability of cost-related medication nonadherence (CRNA) among Canadians using data from the Canadian Community Health Survey (CCHS).
+The goal of the study was to identify predictors of cost-related medication nonadherence (CRNA), and develop and internally validate machine learning models to estimate the probability of CRNA among Canadians using data from the Canadian Community Health Survey (CCHS).
 
 
 ## Data source
@@ -18,18 +18,17 @@ The dataset is publicly available but must be downloaded directly from Statistic
 Repository structure
 
 data/
-  Example input data structure
+  example_input_structure.csv
+    Example dataset illustrating the required predictor variables for generating predictions
 
 scripts/
-  Data preparation and modelling scripts
+  Data preparation, model development, and validation scripts
 
 models/
-  Saved trained models (.rds)
+  elastic_net_crna_final_model.rds
+  elastic_net_crna_sex_race_pr.rds
 
-elastic_model_crna_main.rds
-elastic_model_crna_sex_race_province.rds
-
-predict_model.R
+CRNA_prediction_Canada_script.Rmd
   Script demonstrating how to generate predicted probabilities
 
 
@@ -57,8 +56,15 @@ AUROC ≈ 0.72
 Load the trained model:
 
 ```r
-model <- readRDS("models/elastic_model_crna_main.rds")
+# final model with 5 predictors
+model <- readRDS("folder/elastic_net_crna_final_model.rds")
 ```
+
+```r
+# Alternative model incorporating sex, race, and province of residence variables
+model <- readRDS("folder/elastic_net_crna_sex_race_pr.rds")
+```
+
 ## Generate predicted probabilities
 predict(model, new_data = input_data, type = "prob")
 
