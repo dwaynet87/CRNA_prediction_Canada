@@ -26,11 +26,8 @@ library(srvyr)
 library(tidymodels) # ML model building
 library(doParallel)
 library(WeightedROC)
-library(dplyr)
-library(ggplot2)
 library(Hmisc)  # for wtd.mean, wtd.var if needed
 library(broom)
-library(dplyr)
 library(rsample)
 library(purrr)
 library(CalibrationCurves)
@@ -883,7 +880,6 @@ subset(descriptives, variable == "DHH_SEX")
 ```
 
 
-
 ```{r}
 # Proportion with PEX_090 == "Yes" within levels of one variable, as % + 95% CI
 get_crna_by_var <- function(var, design, digits = 1) {
@@ -1022,6 +1018,21 @@ descriptives_test <- do.call(
 
 
 ```{r}
+# Weighted frequency, proportion, and 95% CI for PEX_090
+# Training and testing cohorts
+
+# PEX_090 weighted proportions and 95% CIs only
+
+svymean(~PEX_090, cchs_design_train, na.rm = TRUE)
+confint(svymean(~PEX_090, cchs_design_train, na.rm = TRUE)) * 100
+
+svymean(~PEX_090, cchs_design_test, na.rm = TRUE)
+confint(svymean(~PEX_090, cchs_design_test, na.rm = TRUE)) * 100
+
+```
+
+
+```{r}
 set.seed(2025)
 # Impute training data
 train_impute <- train %>% select(PEX_090, DHH_SEX, DHHGAGE, EHG2DVH3, INCDGHH, DHHGMS,GEN_005, 
@@ -1054,7 +1065,11 @@ mcar_test(train_impute)
 miss_var_summary(train_impute)
 
 ```
+```{r}
+miss_var_summary(test_impute)
 
+
+```
 
 ```{r}
 set.seed(2025)
@@ -1357,10 +1372,15 @@ folds <- vfold_cv(train_imputed_data, v = 5, repeats = 3)
 # penalty range = 10^-4 to 10^1
 # mixture range = 0.1 to 1 (avoids pure ridge)
 
-glmnet_grid <- grid_regular(
-  penalty(range = c(-4, 2), trans = log10_trans()),
-  mixture(range = c(0.1, 1)),
-  levels = 100
+#glmnet_grid <- grid_regular(
+ # penalty(range = c(-4, 2), trans = log10_trans()),
+#  mixture(range = c(0.1, 1)),
+ # levels = 100
+
+  glmnet_grid <- grid_regular(
+  penalty(range = c(-4, 2)),   # 1e-4 to 10
+  mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+  levels = c(penalty = 20, mixture =100)
 )
 
 # TUNING
@@ -1439,7 +1459,7 @@ pretty_labels_map <- c(
   "respiratory" = "Respiratory conditions",
   "cardiometabolic" = "Cardiometabolic condiitons",
   "neurologic_pain" = "Neurologic/pain-related conditions",
-  "mental_health" = "Mental health conditions`",
+  "mental_health" = "Mental health conditions",
   "cancer" = "Cancer"
 )
 
@@ -1464,8 +1484,8 @@ importance_plot <- coefs_summary %>%
   geom_col(fill = "#1b9e77") +
   coord_flip() +
   labs(
-    x = "",
-    y = "Mean |Penalized Coefficient|",
+    x = "Predictors",
+    y = "Mean absolute elastic net coefficients",
     title = "Elastic Net Variable Importance"
   ) +
   theme_minimal(base_size = 14) +
@@ -1524,10 +1544,15 @@ glmnet_workflow2 <- workflow() %>%
 
 
 # Grid for tuning
+#glmnet_grid2 <- grid_regular(
+#  penalty(range = c(-4, 2)),   # 1e-4 to 10
+ # mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+ # levels = 100
+  
 glmnet_grid2 <- grid_regular(
   penalty(range = c(-4, 2)),   # 1e-4 to 10
   mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
-  levels = 100
+  levels = c(penalty = 10, mixture =100)
 )
 
 
@@ -1867,7 +1892,7 @@ rf_cal_result <- valProbggplot(
   pl       = TRUE,# plot calibration curve
   nr.knots = 3,
   dostats = FALSE,
-  riskdist = TRUE,
+  riskdist = FALSE,#"predicted",
   roundstats = 3,
   statloc = c(0, 0.7),
   legendloc = c(0.5, 0.2),
@@ -1880,6 +1905,39 @@ rf_cal_result <- valProbggplot(
 #print(rf_cal_result$calibration)
 print(rf_cal_result)
 #ggsave("rf_calibration_plot.pdf", rf_cal_result, width = 8, height = 6, dpi = 300, device = cairo_pdf)
+
+library(patchwork)
+rf_hist <- ggplot(rf_tidy_preds,
+               aes(x = .pred_Yes,
+                   weight = WTS_M)) +
+  geom_histogram(
+    bins = 30,
+    binwidth = 0.025,
+    boundary = 0,
+    closed = "left",
+    fill = "grey65",
+   # colour = "white",
+   # linewidth = 0.6
+  ) +
+  theme_classic() +
+  labs(
+    x = "Predicted probability",
+    y = "Weighted frequency"
+  ) +
+  coord_cartesian(xlim = c(0, 0.75))
+
+# convert the calibration plot to a grob first because ggplotcalibrationcurves is not a standard ggplot object that patchwork can combine directly
+
+rf_cal_grob <- grid.grabExpr(
+  print(rf_cal_result)
+)
+
+rf_combined_plot <- wrap_elements(full = rf_cal_grob) / rf_hist +
+  plot_layout(heights = c(3, 1))
+
+rf_combined_plot
+
+
 ```
 
 ```{r}
@@ -1895,11 +1953,11 @@ glm_cal_result <- valProbggplot(
   pl       = TRUE,# plot calibration curve
   nr.knots = 3,
   dostats = FALSE,
-  riskdist = TRUE,
+  riskdist = FALSE,
   roundstats = 3,
   statloc = c(0, 0.7),
   legendloc = c(0.5, 0.2),
-  xlim = c(0, 0.75)
+  xlim = c(0, 0.75),
   )
 
 # View calibration coefficients
@@ -1908,6 +1966,36 @@ glm_cal_result <- valProbggplot(
 #print(glm_cal_result$calibration)
  print(glm_cal_result)
 
+ library(patchwork)
+glm_hist <- ggplot(glmnet_preds,
+               aes(x = .pred_Yes,
+                   weight = WTS_M)) +
+  geom_histogram(
+    bins = 30,
+    binwidth = 0.025,
+    boundary = 0,
+    closed = "left",
+    fill = "grey65",
+   # colour = "white",
+   # linewidth = 0.3
+  ) +
+  theme_classic() +
+  labs(
+    x = "Predicted probability",
+    y = "Weighted frequency"
+  ) +
+  coord_cartesian(xlim = c(0, 0.75))
+
+# convert the calibration plot to a grob first because ggplotcalibrationcurves is not a standard ggplot object that patchwork can combine directly
+
+glm_cal_grob <- grid.grabExpr(
+  print(glm_cal_result)
+)
+
+glm_combined_plot <- wrap_elements(full = glm_cal_grob) / glm_hist +
+  plot_layout(heights = c(3, 1))
+
+glm_combined_plot
 ```
 
 
@@ -1938,7 +2026,65 @@ lgbm_cal_result <- valProbggplot(
 # Intercept ≈ 0 → good calibration-in-the-large
 # Slope ≈ 1 → well-calibrated probabilities
 print(lgbm_cal_result)
+
+
+lgb_hist <- ggplot(lgb_preds,
+               aes(x = .pred_Yes,
+                   weight = WTS_M)) +
+  geom_histogram(
+    bins = 30,
+    binwidth = 0.025,
+    boundary = 0,
+    closed = "left",
+    fill = "grey65",
+   # colour = "white",
+   # linewidth = 0.3
+  ) +
+  theme_classic() +
+  labs(
+    x = "Predicted probability",
+    y = "Weighted frequency"
+  ) +
+  coord_cartesian(xlim = c(0, 0.75))
+
+# convert the calibration plot to a grob first because ggplotcalibrationcurves is not a standard ggplot object that patchwork can combine directly
+
+lgb_cal_grob <- grid.grabExpr(
+  print(lgbm_cal_result)
+)
+
+lgb_combined_plot <- wrap_elements(full = lgb_cal_grob) / lgb_hist +
+  plot_layout(heights = c(3, 1))
+
+lgb_combined_plot
 ```
+```{r}
+library(patchwork)
+
+final_calibration_plot <- wrap_elements(full = rf_combined_plot) +
+  wrap_elements(full = glm_combined_plot) +
+  wrap_elements(full = lgb_combined_plot) +
+  plot_layout(ncol = 3) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14)
+  )
+
+final_calibration_plot
+
+ggsave(
+  filename = "Figure2_Calibration_Plots.pdf",
+  plot = final_calibration_plot,
+  width = 15,
+  height = 8.5,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+```
+
+
 
 ```{r}
 # Extract the underlying glmnet engine
