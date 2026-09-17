@@ -56,6 +56,13 @@ miss_summary(data)
 miss_var_summary(data)
 
 ```
+```{r}
+library(pmsampsize)
+pmsampsize(type = "b", cstatistic = 0.70, parameters = 19, prevalence = 0.066)
+
+
+```
+
 
 ```{r}
 # RECODING OF KEY VARIABLES. "Not stated", "Don't know", "Refusal", "Not stated" was re-coded as Missing/ Na 
@@ -1065,11 +1072,7 @@ mcar_test(train_impute)
 miss_var_summary(train_impute)
 
 ```
-```{r}
-miss_var_summary(test_impute)
 
-
-```
 
 ```{r}
 set.seed(2025)
@@ -2656,5 +2659,644 @@ miss_var_summary(data2)
 ```
 
 
+# Sensitivity analysis for parsimony rationale
+```{r}
+set.seed(2025)
+
+# Parallel backend
+
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+glm7_train_subset <- train_variables %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, INCDGHH, mental_health, DHH_OWN, neurologic_pain, WTS_M)
+
+glm7_train_subset$PEX_090 <- factor(glm7_train_subset$PEX_090, levels = c("No", "Yes"))
+
+glmnet7_recipe2 <- recipe(
+  PEX_090 ~ DHHGAGE + INCDGHH + INS_005 + chronic_condition_number + mental_health + DHH_OWN + neurologic_pain + WTS_M, 
+  data = glm7_train_subset
+) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+
+
+# Model specification
+glmnet7_spec2 <- logistic_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow
+
+glmnet7_workflow2 <- workflow() %>%
+  add_recipe(glmnet7_recipe2) %>%
+  add_model(glmnet7_spec2)
+
+
+# Grid for tuning
+#glmnet_grid2 <- grid_regular(
+#  penalty(range = c(-4, 2)),   # 1e-4 to 10
+ # mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+ # levels = 100
+  
+glmnet7_grid2 <- grid_regular(
+  penalty(range = c(-4, 2)),   # 1e-4 to 10
+  mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+  levels = c(penalty = 10, mixture =100)
+)
+
+
+# Tune in parallel
+glmnet7_tune2 <- tune_grid(
+  glmnet7_workflow2,
+  resamples = folds,
+  grid = glmnet7_grid2,
+  metrics = metric_set(mn_log_loss),
+  control = control_grid(
+    parallel_over = "resamples",
+    save_pred = FALSE,
+    allow_par = TRUE
+  )
+)
+
+# Select best model
+best_glmnet7 <- select_best(glmnet7_tune2, metric = "mn_log_loss")
+
+# Finalize and fit model
+final_glmnet7_workflow2 <- finalize_workflow(glmnet7_workflow2, best_glmnet7)
+final_glmnet7_fit2 <- fit(final_glmnet7_workflow2, data = glm7_train_subset)
+
+# Variable-level importance
+glmnet7_importance <- tidy(final_glmnet7_fit2) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = mean(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet7_importance)
+
+# Plot top predictors
+glmnet7_importance %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities
+glmnet7_preds <- predict(final_glmnet7_fit2, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+
+# Weighted ROC computation
+glm7_weighted_roc <- WeightedROC(
+  guess  = glmnet7_preds$.pred_Yes,
+  label  = as.integer(glmnet7_preds$PEX_090 == "Yes"),
+  weight = glmnet7_preds$WTS_M
+)
+
+# Weighted AUC
+glm7_weighted_auc <- WeightedAUC(glm7_weighted_roc)
+cat("Weighted AUC:", glm7_weighted_auc, "\n")
+
+# Weighted ROC plot
+plot(glm7_weighted_roc$FPR, glm7_weighted_roc$TPR, type = "l", col = "#2c7bb6", lwd = 2,
+     xlab = "Weighted False Positive Rate",
+     ylab = "Weighted True Positive Rate",
+     main = paste0("Weighted ROC Curve (AUC = ", round(glm7_weighted_auc, 3), ")"))
+abline(0, 1, lty = 2, col = "gray50")
+
+```
+
+```{r}
+set.seed(2025)
+
+# Bootstrap 95% CI for weighted AUC
+B <- 1000
+
+glm7_auc_boot <- replicate(B, {
+  idx <- sample(seq_len(nrow(glmnet7_preds)), replace = TRUE)
+  
+  WeightedAUC(
+    WeightedROC(
+      guess  = glmnet7_preds$.pred_Yes[idx],
+      label  = as.integer(glmnet7_preds$PEX_090[idx] == "Yes"),
+      weight = glmnet7_preds$WTS_M[idx]
+    )
+  )
+})
+
+# 95% percentile CI
+ci_glm7_auc_boot <- quantile(
+  glm7_auc_boot,
+  probs = c(0.025, 0.975),
+  na.rm = TRUE
+)
+
+cat(
+  "Weighted AUC:", round(glm7_weighted_auc, 3),
+  "\n95% CI:", round(ci_glm7_auc_boot[1], 3),
+  "-", round(ci_glm7_auc_boot[2], 3), "\n"
+)
+
+
+# Weighted ROC curve
+glm7_weighted_roc <- WeightedROC(
+  guess  = glmnet7_preds$.pred_Yes,
+  label  = as.integer(glmnet7_preds$PEX_090 == "Yes"),
+  weight = glmnet7_preds$WTS_M
+)
+
+# ROC plot
+plot(
+  glm7_weighted_roc$FPR,
+  glm7_weighted_roc$TPR,
+  type = "l",
+  col = "#7570b3",
+  lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0(
+    "Weighted ROC (7-Predictor Elastic Net)\n",
+    "AUC = ", round(glm7_weighted_auc, 3),
+    " [95% CI ",
+    round(ci_glm7_auc_boot[1], 3), "–",
+    round(ci_glm7_auc_boot[2], 3), "]"
+  )
+)
+
+abline(0, 1, col = "gray60", lty = 2)
+```
+
+```{r}
+# Weighted calibration curve with confidence intervals
+glm7_cal_result <- valProbggplot(
+  p        = glmnet7_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet7_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet7_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm7_cal_result) 
+
+```
+
+
+
+
+```{r}
+set.seed(2025)
+
+# Parallel backend
+
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+glm9_train_subset <- train_variables %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, INCDGHH, mental_health, DHH_OWN, neurologic_pain, SDC_035, respiratory, WTS_M)
+
+glm9_train_subset$PEX_090 <- factor(glm9_train_subset$PEX_090, levels = c("No", "Yes"))
+
+glmnet9_recipe2 <- recipe(
+  PEX_090 ~ DHHGAGE + INCDGHH + INS_005 + chronic_condition_number + mental_health + DHH_OWN + neurologic_pain + SDC_035 + respiratory + WTS_M, 
+  data = glm9_train_subset
+) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+
+
+# Model specification
+glmnet9_spec2 <- logistic_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow
+
+glmnet9_workflow2 <- workflow() %>%
+  add_recipe(glmnet9_recipe2) %>%
+  add_model(glmnet9_spec2)
+
+
+# Grid for tuning
+#glmnet_grid2 <- grid_regular(
+#  penalty(range = c(-4, 2)),   # 1e-4 to 10
+ # mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+ # levels = 100
+  
+glmnet9_grid2 <- grid_regular(
+  penalty(range = c(-4, 2)),   # 1e-4 to 10
+  mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+  levels = c(penalty = 10, mixture =100)
+)
+
+
+# Tune in parallel
+glmnet9_tune2 <- tune_grid(
+  glmnet9_workflow2,
+  resamples = folds,
+  grid = glmnet7_grid2,
+  metrics = metric_set(mn_log_loss),
+  control = control_grid(
+    parallel_over = "resamples",
+    save_pred = FALSE,
+    allow_par = TRUE
+  )
+)
+
+# Select best model
+best_glmnet9 <- select_best(glmnet9_tune2, metric = "mn_log_loss")
+
+# Finalize and fit model
+final_glmnet9_workflow2 <- finalize_workflow(glmnet9_workflow2, best_glmnet9)
+final_glmnet9_fit2 <- fit(final_glmnet9_workflow2, data = glm9_train_subset)
+
+# Variable-level importance
+glmnet9_importance <- tidy(final_glmnet9_fit2) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = mean(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet9_importance)
+
+# Plot top predictors
+glmnet9_importance %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities
+glmnet9_preds <- predict(final_glmnet9_fit2, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+
+# Weighted ROC computation
+glm9_weighted_roc <- WeightedROC(
+  guess  = glmnet9_preds$.pred_Yes,
+  label  = as.integer(glmnet9_preds$PEX_090 == "Yes"),
+  weight = glmnet9_preds$WTS_M
+)
+
+# Weighted AUC
+glm9_weighted_auc <- WeightedAUC(glm9_weighted_roc)
+cat("Weighted AUC:", glm9_weighted_auc, "\n")
+
+# Weighted ROC plot
+plot(glm9_weighted_roc$FPR, glm9_weighted_roc$TPR, type = "l", col = "#2c7bb6", lwd = 2,
+     xlab = "Weighted False Positive Rate",
+     ylab = "Weighted True Positive Rate",
+     main = paste0("Weighted ROC Curve (AUC = ", round(glm9_weighted_auc, 3), ")"))
+abline(0, 1, lty = 2, col = "gray50")
+
+```
+
+
+```{r}
+set.seed(2025)
+
+# Bootstrap 95% CI for weighted AUC
+B <- 1000
+
+glm9_auc_boot <- replicate(B, {
+  idx <- sample(seq_len(nrow(glmnet9_preds)), replace = TRUE)
+  
+  WeightedAUC(
+    WeightedROC(
+      guess  = glmnet9_preds$.pred_Yes[idx],
+      label  = as.integer(glmnet9_preds$PEX_090[idx] == "Yes"),
+      weight = glmnet9_preds$WTS_M[idx]
+    )
+  )
+})
+
+# 95% percentile CI
+ci_glm9_auc_boot <- quantile(
+  glm9_auc_boot,
+  probs = c(0.025, 0.975),
+  na.rm = TRUE
+)
+
+cat(
+  "Weighted AUC:", round(glm9_weighted_auc, 3),
+  "\n95% CI:", round(ci_glm9_auc_boot[1], 3),
+  "-", round(ci_glm9_auc_boot[2], 3), "\n"
+)
+
+
+# Weighted ROC curve
+glm9_weighted_roc <- WeightedROC(
+  guess  = glmnet9_preds$.pred_Yes,
+  label  = as.integer(glmnet9_preds$PEX_090 == "Yes"),
+  weight = glmnet9_preds$WTS_M
+)
+
+# ROC plot
+plot(
+  glm9_weighted_roc$FPR,
+  glm9_weighted_roc$TPR,
+  type = "l",
+  col = "#7570b3",
+  lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0(
+    "Weighted ROC (7-Predictor Elastic Net)\n",
+    "AUC = ", round(glm9_weighted_auc, 3),
+    " [95% CI ",
+    round(ci_glm9_auc_boot[1], 3), "–",
+    round(ci_glm9_auc_boot[2], 3), "]"
+  )
+)
+
+abline(0, 1, col = "gray60", lty = 2)
+```
+```{r}
+# Weighted calibration curve with confidence intervals
+glm9_cal_result <- valProbggplot(
+  p        = glmnet9_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet9_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet9_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm9_cal_result) 
+
+```
+
+```{r}
+set.seed(2025)
+
+# Parallel backend
+
+nc <- parallel::detectCores(logical = TRUE)
+cl <- makeCluster(max(1, nc - 1))
+registerDoParallel(cl)
+on.exit({
+  try(stopCluster(cl), silent = TRUE)
+  registerDoSEQ()
+}, add = TRUE)
+
+glm3_train_subset <- train_variables %>%
+  select(PEX_090, DHHGAGE, INS_005, chronic_condition_number, WTS_M)
+
+glm3_train_subset$PEX_090 <- factor(glm3_train_subset$PEX_090, levels = c("No", "Yes"))
+
+glmnet3_recipe2 <- recipe(
+  PEX_090 ~ DHHGAGE + INS_005 + chronic_condition_number + WTS_M, 
+  data = glm3_train_subset
+) %>%
+  update_role(WTS_M, new_role = "case_weight") %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+
+
+# Model specification
+glmnet3_spec2 <- logistic_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+# Workflow
+
+glmnet3_workflow2 <- workflow() %>%
+  add_recipe(glmnet3_recipe2) %>%
+  add_model(glmnet3_spec2)
+
+
+# Grid for tuning
+#glmnet_grid2 <- grid_regular(
+#  penalty(range = c(-4, 2)),   # 1e-4 to 10
+ # mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+ # levels = 100
+  
+glmnet3_grid2 <- grid_regular(
+  penalty(range = c(-4, 2)),   # 1e-4 to 10
+  mixture(range = c(0.1, 1)),  # elastic net between ridge & lasso
+  levels = c(penalty = 10, mixture =100)
+)
+
+
+# Tune in parallel
+glmnet3_tune2 <- tune_grid(
+  glmnet3_workflow2,
+  resamples = folds,
+  grid = glmnet3_grid2,
+  metrics = metric_set(mn_log_loss),
+  control = control_grid(
+    parallel_over = "resamples",
+    save_pred = FALSE,
+    allow_par = TRUE
+  )
+)
+
+# Select best model
+best_glmnet3 <- select_best(glmnet3_tune2, metric = "mn_log_loss")
+
+# Finalize and fit model
+final_glmnet3_workflow2 <- finalize_workflow(glmnet3_workflow2, best_glmnet3)
+final_glmnet3_fit2 <- fit(final_glmnet3_workflow2, data = glm3_train_subset)
+
+# Variable-level importance
+glmnet3_importance <- tidy(final_glmnet3_fit2) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(variable = gsub("_.*", "", term)) %>%
+  group_by(variable) %>%
+  summarise(abs_coef = mean(abs(estimate), na.rm = TRUE)) %>%
+  arrange(desc(abs_coef))
+
+print(glmnet3_importance)
+
+# Plot top predictors
+glmnet3_importance %>%
+  ggplot(aes(x = reorder(variable, abs_coef), y = abs_coef)) +
+  geom_col(fill = "#1b9e77") +
+  coord_flip() +
+  labs(
+    x = "Predictor",
+    y = "Summed |Coefficient|",
+    title = "Variable Importance (Collapsed Across Levels)"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Weighted ROC / AUC on Test Data
+
+# Predict probabilities
+glmnet3_preds <- predict(final_glmnet3_fit2, new_data = test_imputed_data, type = "prob") %>%
+  bind_cols(test_imputed_data %>% select(PEX_090, WTS_M))
+
+
+# Weighted ROC computation
+glm3_weighted_roc <- WeightedROC(
+  guess  = glmnet3_preds$.pred_Yes,
+  label  = as.integer(glmnet3_preds$PEX_090 == "Yes"),
+  weight = glmnet3_preds$WTS_M
+)
+
+# Weighted AUC
+glm3_weighted_auc <- WeightedAUC(glm3_weighted_roc)
+cat("Weighted AUC:", glm3_weighted_auc, "\n")
+
+# Weighted ROC plot
+plot(glm3_weighted_roc$FPR, glm3_weighted_roc$TPR, type = "l", col = "#2c7bb6", lwd = 2,
+     xlab = "Weighted False Positive Rate",
+     ylab = "Weighted True Positive Rate",
+     main = paste0("Weighted ROC Curve (AUC = ", round(glm3_weighted_auc, 3), ")"))
+abline(0, 1, lty = 2, col = "gray50")
+
+```
+
+```{r}
+set.seed(2025)
+
+# Bootstrap 95% CI for weighted AUC
+B <- 1000
+
+glm3_auc_boot <- replicate(B, {
+  idx <- sample(seq_len(nrow(glmnet3_preds)), replace = TRUE)
+  
+  WeightedAUC(
+    WeightedROC(
+      guess  = glmnet3_preds$.pred_Yes[idx],
+      label  = as.integer(glmnet3_preds$PEX_090[idx] == "Yes"),
+      weight = glmnet3_preds$WTS_M[idx]
+    )
+  )
+})
+
+# 95% percentile CI
+ci_glm3_auc_boot <- quantile(
+  glm3_auc_boot,
+  probs = c(0.025, 0.975),
+  na.rm = TRUE
+)
+
+cat(
+  "Weighted AUC:", round(glm3_weighted_auc, 3),
+  "\n95% CI:", round(ci_glm3_auc_boot[1], 3),
+  "-", round(ci_glm3_auc_boot[2], 3), "\n"
+)
+
+
+# Weighted ROC curve
+glm3_weighted_roc <- WeightedROC(
+  guess  = glmnet3_preds$.pred_Yes,
+  label  = as.integer(glmnet3_preds$PEX_090 == "Yes"),
+  weight = glmnet3_preds$WTS_M
+)
+
+# ROC plot
+plot(
+  glm3_weighted_roc$FPR,
+  glm3_weighted_roc$TPR,
+  type = "l",
+  col = "#7570b3",
+  lwd = 2,
+  xlab = "Weighted False Positive Rate",
+  ylab = "Weighted True Positive Rate",
+  main = paste0(
+    "Weighted ROC (7-Predictor Elastic Net)\n",
+    "AUC = ", round(glm3_weighted_auc, 3),
+    " [95% CI ",
+    round(ci_glm3_auc_boot[1], 3), "–",
+    round(ci_glm3_auc_boot[2], 3), "]"
+  )
+)
+
+abline(0, 1, col = "gray60", lty = 2)
+```
+
+```{r}
+# Weighted calibration curve with confidence intervals
+glm3_cal_result <- valProbggplot(
+  p        = glmnet3_preds$.pred_Yes,             # predicted probabilities
+  y        = ifelse(glmnet3_preds$PEX_090 == "Yes", 1, 0),  # binary outcome (0/1)
+  weights  = glmnet3_preds$WTS_M,                 # case weights (survey weights)
+  smooth   = "rcs",                           # smooth curve fit
+  CL.smooth = "fill",                           # shaded confidence bands
+  normwt   = TRUE,                              # normalize weights
+  #logistic.cal = TRUE,                          # compute calibration intercept/slope
+  pl       = TRUE,# plot calibration curve
+  nr.knots = 3,
+  dostats = FALSE,
+  riskdist = TRUE,
+  roundstats = 3,
+  statloc = c(0, 0.7),
+  legendloc = c(0.5, 0.2),
+  xlim = c(0, 0.75)
+  )
+
+# View calibration coefficients
+# Intercept ≈ 0 → good calibration-in-the-large
+# Slope ≈ 1 → well-calibrated probabilities
+#print(glm_cal_result$calibration)
+ print(glm3_cal_result) 
+
+```
 
 
