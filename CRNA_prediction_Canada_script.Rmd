@@ -3291,6 +3291,7 @@ glm3_cal_result <- valProbggplot(
   xlim = c(0, 0.75)
   )
 
+
 # View calibration coefficients
 # Intercept ≈ 0 → good calibration-in-the-large
 # Slope ≈ 1 → well-calibrated probabilities
