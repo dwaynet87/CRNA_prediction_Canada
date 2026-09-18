@@ -2659,7 +2659,7 @@ miss_var_summary(data2)
 ```
 
 
-# Sensitivity analysis for parsimony rationale
+# Sensitivity analysis for parsimony rationale. Comparing elastic net models with the top 3, 5, and 9 highest ranking predictors to the final model with 5. 
 ```{r}
 set.seed(2025)
 
@@ -3084,7 +3084,6 @@ glm9_cal_result <- valProbggplot(
 # Slope ≈ 1 → well-calibrated probabilities
 #print(glm_cal_result$calibration)
  print(glm9_cal_result) 
-
 ```
 
 ```{r}
@@ -3290,6 +3289,7 @@ glm3_cal_result <- valProbggplot(
   legendloc = c(0.5, 0.2),
   xlim = c(0, 0.75)
   )
+
 
 # View calibration coefficients
 # Intercept ≈ 0 → good calibration-in-the-large
